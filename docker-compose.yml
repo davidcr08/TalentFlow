@@ -94,10 +94,14 @@ services:
       DB_USER: ${DB_EMPLEADOS_USER:-user_empleados}
       DB_PASS: ${DB_EMPLEADOS_PASS:-pass_empleados}
       DEPARTAMENTOS_SERVICE_URL: http://departamentos-service:8082
+      BROKER_URL: amqp://${RABBITMQ_USER:-talentflow}:${RABBITMQ_PASS:-talentflow_dev}@message-broker:5672/
+      BROKER_EXCHANGE: talentflow.events
     depends_on:
       database-empleados:
         condition: service_healthy
       departamentos-service:
+        condition: service_healthy
+      message-broker:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
