@@ -1,7 +1,8 @@
 const { AppError } = require("../errores");
 const { crearEmpleado } = require("../dominio/empleado");
 
-function crearServicioEmpleados(repositorio, clienteDepartamentos) {
+function crearServicioEmpleados
+(repositorio, clienteDepartamentos, publicadorEventos = null) {
   async function registrar(datos) {
     const empleado = crearEmpleado(datos);
 
@@ -40,7 +41,20 @@ function crearServicioEmpleados(repositorio, clienteDepartamentos) {
     // reconciliarPendientes() la revise cuando el servicio se restablezca.
     empleado.validacionDepartamento = resultadoDepto === "PENDIENTE" ? "PENDIENTE" : "ACEPTADO";
 
-    return repositorio.guardar(empleado);
+    const empleadoGuardado = await repositorio.guardar(empleado);
+
+if (publicadorEventos) {
+  try {
+    await publicadorEventos.publicar("empleado.creado", empleadoGuardado);
+  } catch (error) {
+    console.error(
+      "No se pudo publicar el evento empleado.creado:",
+      error.message
+    );
+  }
+}
+
+return empleadoGuardado;
   }
 
   // Se ejecuta cuando departamentos-service se restablece (Circuit Breaker -> CLOSED).
