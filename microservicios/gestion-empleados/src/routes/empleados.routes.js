@@ -12,6 +12,21 @@ function crearRouterEmpleados(servicioEmpleados) {
     }
   });
 
+  
+router.put("/empleados/:id", async (req, res, next) => {
+  try {
+    const empleado = await servicioEmpleados.actualizar(
+      req.params.id,
+      req.body ?? {}
+    );
+
+    res.status(200).json(empleado);
+  } catch (error) {
+    next(error);
+  }
+});
+
+
   router.get("/empleados", async (req, res, next) => {
     try {
       const empleados = await servicioEmpleados.listar();

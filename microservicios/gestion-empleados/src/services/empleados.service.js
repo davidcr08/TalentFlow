@@ -57,6 +57,92 @@ if (publicadorEventos) {
 return empleadoGuardado;
   }
 
+
+
+
+  
+  async function actualizar(id, datos) {
+  // El empleado debe existir antes de intentar actualizarlo.
+  const existente = await repositorio.buscarPorId(id);
+
+  if (!existente) {
+    throw new AppError(`El empleado con id ${id} no existe`, 404);
+  }
+
+  // El ID de la URL prevalece sobre cualquier ID enviado en el cuerpo.
+  const empleado = crearEmpleado({ ...datos, id });
+
+  // Evita duplicados, permitiendo conservar los datos del propio empleado.
+  const emailYaExiste = await repositorio.buscarPorEmail(empleado.email);
+
+  if (emailYaExiste && emailYaExiste.id !== id) {
+    throw new AppError(`El email ${empleado.email} ya está registrado`, 400, [
+      { field: "email", message: "Ya está registrado", rejectedValue: empleado.email }
+    ]);
+  }
+
+  const numeroYaExiste = await repositorio.buscarPorNumeroEmpleado(
+    empleado.numeroEmpleado
+  );
+
+  if (numeroYaExiste && numeroYaExiste.id !== id) {
+    throw new AppError(
+      `El numeroEmpleado ${empleado.numeroEmpleado} ya está registrado`,
+      400,
+      [
+        {
+          field: "numeroEmpleado",
+          message: "Ya está registrado",
+          rejectedValue: empleado.numeroEmpleado
+        }
+      ]
+    );
+  }
+
+  const resultadoDepto = await clienteDepartamentos.existe(
+    empleado.departamentoId
+  );
+
+  if (resultadoDepto === "NO_EXISTE") {
+    throw new AppError(
+      `El departamento ${empleado.departamentoId} no existe`,
+      400,
+      [
+        {
+          field: "departamentoId",
+          message: "No existe",
+          rejectedValue: empleado.departamentoId
+        }
+      ]
+    );
+  }
+
+  empleado.validacionDepartamento =
+    resultadoDepto === "PENDIENTE" ? "PENDIENTE" : "ACEPTADO";
+
+  const empleadoActualizado = await repositorio.actualizar(id, empleado);
+
+  if (!empleadoActualizado) {
+    throw new AppError(`El empleado con id ${id} no existe`, 404);
+  }
+
+  if (publicadorEventos) {
+    try {
+      await publicadorEventos.publicar(
+        "empleado.actualizado",
+        empleadoActualizado
+      );
+    } catch (error) {
+      console.error(
+        "No se pudo publicar el evento empleado.actualizado:",
+        error.message
+      );
+    }
+  }
+
+  return empleadoActualizado;
+}
+
   // Se ejecuta cuando departamentos-service se restablece (Circuit Breaker -> CLOSED).
   // Revisa cada empleado que quedó PENDIENTE y lo mueve a ACEPTADO o RECHAZADO según
   // la respuesta real del servicio. Si a mitad de la revisión el circuito vuelve a
@@ -94,6 +180,7 @@ return empleadoGuardado;
 
   return {
     registrar,
+    actualizar,
     consultarPorId,
     listar,
     reconciliarPendientes
