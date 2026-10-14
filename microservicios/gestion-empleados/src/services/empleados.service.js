@@ -212,8 +212,8 @@ async function retirar(id) {
     return empleado;
   }
 
-  async function listar() {
-      return repositorio.listar(estado);
+  async function listar(estado, desde, hasta) {
+      return repositorio.listar(estado, desde, hasta);
   }
 
   return {

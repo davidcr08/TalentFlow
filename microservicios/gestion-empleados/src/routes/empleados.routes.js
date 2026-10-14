@@ -45,7 +45,11 @@ router.put("/empleados/:id", async (req, res, next) => {
   
   router.get("/empleados", async (req, res, next) => {
     try {
-      const empleados = await servicioEmpleados.listar(req.query.estado);
+      const empleados = await servicioEmpleados.listar(
+       req.query.estado,
+       req.query.desde,
+       req.query.hasta
+       );
       res.status(200).json(empleados);
     } catch (error) {
       next(error);
