@@ -45,7 +45,12 @@ function crearServicioEmpleados
 
 if (publicadorEventos) {
   try {
-    await publicadorEventos.publicar("empleado.creado", empleadoGuardado);
+    await publicadorEventos.publicar("empleado.creado", {
+  empleadoId: empleadoGuardado.id,
+  email: empleadoGuardado.email,
+  nombre: empleadoGuardado.nombre,
+  apellido: empleadoGuardado.apellido
+});
   } catch (error) {
     console.error(
       "No se pudo publicar el evento empleado.creado:",
