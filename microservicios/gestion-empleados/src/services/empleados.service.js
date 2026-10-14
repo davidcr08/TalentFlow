@@ -143,6 +143,44 @@ return empleadoGuardado;
   return empleadoActualizado;
 }
 
+
+  //Reto 04 
+  
+async function retirar(id) {
+  const existente = await repositorio.buscarPorId(id);
+
+  if (!existente) {
+    throw new AppError(`El empleado con id ${id} no existe`, 404);
+  }
+
+  if (existente.estado === "RETIRADO") {
+    throw new AppError(`El empleado con id ${id} ya está retirado`, 409);
+  }
+
+  const empleadoRetirado = await repositorio.retirar(id);
+
+  if (!empleadoRetirado) {
+    throw new AppError(`No se pudo retirar el empleado con id ${id}`, 409);
+  }
+
+  if (publicadorEventos) {
+    try {
+      await publicadorEventos.publicar(
+        "empleado.retirado",
+        empleadoRetirado
+      );
+    } catch (error) {
+      console.error(
+        "No se pudo publicar el evento empleado.retirado:",
+        error.message
+      );
+    }
+  }
+
+  return empleadoRetirado;
+}
+
+
   // Se ejecuta cuando departamentos-service se restablece (Circuit Breaker -> CLOSED).
   // Revisa cada empleado que quedó PENDIENTE y lo mueve a ACEPTADO o RECHAZADO según
   // la respuesta real del servicio. Si a mitad de la revisión el circuito vuelve a
@@ -175,12 +213,13 @@ return empleadoGuardado;
   }
 
   async function listar() {
-    return repositorio.listar();
+      return repositorio.listar(estado);
   }
 
   return {
     registrar,
     actualizar,
+    retirar,
     consultarPorId,
     listar,
     reconciliarPendientes

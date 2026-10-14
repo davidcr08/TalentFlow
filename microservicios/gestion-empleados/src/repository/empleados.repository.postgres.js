@@ -1,7 +1,9 @@
 const { AppError } = require("../errores");
 
+
 function filaAEmpleado(fila) {
   if (!fila) return null;
+
   return {
     id: fila.id,
     nombre: fila.nombre,
@@ -16,9 +18,13 @@ function filaAEmpleado(fila) {
         ? fila.fecha_ingreso.toISOString().slice(0, 10)
         : fila.fecha_ingreso,
     estado: fila.estado,
+    fechaRetiro: fila.fecha_retiro
+      ? fila.fecha_retiro.toISOString()
+      : null,
     validacionDepartamento: fila.validacion_departamento
   };
 }
+
 
 function crearRepositorioEmpleadosPostgres(pool) {
   return {
@@ -76,7 +82,7 @@ function crearRepositorioEmpleadosPostgres(pool) {
       }
     },
     
-async actualizar(id, empleado) {
+ async actualizar(id, empleado) {
   const texto = `
     UPDATE empleados
     SET nombre = $1,
@@ -136,6 +142,21 @@ async actualizar(id, empleado) {
     throw error;
   }
 },
+ 
+async retirar(id) {
+  const texto = `
+    UPDATE empleados
+    SET estado = 'RETIRADO',
+        fecha_retiro = NOW()
+    WHERE id = $1
+      AND estado <> 'RETIRADO'
+    RETURNING *
+  `;
+
+  const resultado = await pool.query(texto, [id]);
+  return filaAEmpleado(resultado.rows[0]);
+},
+
 
 
     async buscarPorId(id) {

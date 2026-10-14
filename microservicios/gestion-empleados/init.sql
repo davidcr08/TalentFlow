@@ -26,3 +26,6 @@ CREATE TABLE IF NOT EXISTS empleados (
 CREATE INDEX IF NOT EXISTS idx_empleados_departamento_id ON empleados (departamento_id);
 CREATE INDEX IF NOT EXISTS idx_empleados_email ON empleados (email);
 CREATE INDEX IF NOT EXISTS idx_empleados_validacion_departamento ON empleados (validacion_departamento);
+
+ALTER TABLE empleados
+ADD COLUMN IF NOT EXISTS fecha_retiro TIMESTAMP NULL;

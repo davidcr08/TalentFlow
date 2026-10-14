@@ -282,7 +282,7 @@ describe("API de empleados", () => {
 
     it("responde 404 con 'Recurso no encontrado' para un método no soportado", async () => {
       const respuesta = await fetch(`${baseUrl}/empleados/E001`, {
-        method: "DELETE"
+        method: "PATCH"
       });
 
       assert.equal(respuesta.status, 404);

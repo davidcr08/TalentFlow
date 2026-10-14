@@ -27,14 +27,32 @@ router.put("/empleados/:id", async (req, res, next) => {
 });
 
 
+
+//reto 4
+
+  
+  router.delete("/empleados/:id", async (req, res, next) => {
+    try {
+      const empleado = await servicioEmpleados.retirar(req.params.id);
+      res.status(200).json(empleado);
+     } catch (error) {
+      next(error);
+    }
+  });
+
+
+
+  
   router.get("/empleados", async (req, res, next) => {
     try {
-      const empleados = await servicioEmpleados.listar();
+      const empleados = await servicioEmpleados.listar(req.query.estado);
       res.status(200).json(empleados);
     } catch (error) {
       next(error);
     }
   });
+
+
 
   router.get("/empleados/:id", async (req, res, next) => {
     try {
