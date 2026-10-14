@@ -154,7 +154,7 @@ async function retirar(id) {
   }
 
   if (existente.estado === "RETIRADO") {
-    throw new AppError(`El empleado con id ${id} ya está retirado`, 409);
+    throw new AppError(`El empleado con id ${id} ya está retirado`, 400);
   }
 
   const empleadoRetirado = await repositorio.retirar(id);
