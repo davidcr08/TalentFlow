@@ -33,7 +33,7 @@ router.put("/empleados/:id", async (req, res, next) => {
   
   router.delete("/empleados/:id", async (req, res, next) => {
     try {
-      const empleado = await servicioEmpleados.retirar(req.params.id);
+      const empleado = await servicioEmpleados.retirar(req.params.id, req.body?.motivo);
       res.status(200).json(empleado);
      } catch (error) {
       next(error);

@@ -237,3 +237,62 @@ describe("Servicio de empleados", () => {
     });
   });
 });
+
+describe("Eventos de retiro (RF-11)", () => {
+  function publicadorEspia() {
+    const publicados = [];
+    return { publicados, publicar: async (tipo, data) => { publicados.push({ tipo, data }); } };
+  }
+
+  it("retirar publica empleado.retirado con empleadoId, email y fechaRetiro", async () => {
+    const publicador = publicadorEspia();
+    const repo = crearRepositorioEmpleadosEnMemoria();
+    const servicio = crearServicioEmpleados(repo, clienteDepartamentosFalso(), publicador);
+    await servicio.registrar(EMPLEADO_VALIDO);
+    publicador.publicados.length = 0; // descarta el empleado.creado
+
+    await servicio.retirar("E001");
+
+    assert.equal(publicador.publicados.length, 1);
+    const { tipo, data } = publicador.publicados[0];
+    assert.equal(tipo, "empleado.retirado");
+    assert.deepEqual(Object.keys(data).sort(), ["email", "empleadoId", "fechaRetiro"]);
+    assert.equal(data.empleadoId, "E001");
+    assert.equal(data.email, "juan.perez@empresa.com");
+    assert.ok(data.fechaRetiro);
+  });
+
+  it("empleado.creado lleva los campos del catálogo 3.1", async () => {
+    const publicador = publicadorEspia();
+    const servicio = crearServicioEmpleados(
+      crearRepositorioEmpleadosEnMemoria(), clienteDepartamentosFalso(), publicador);
+    await servicio.registrar(EMPLEADO_VALIDO);
+
+    assert.deepEqual(publicador.publicados[0].data, {
+      empleadoId: "E001", nombre: "Juan", apellido: "Pérez", email: "juan.perez@empresa.com",
+      cargo: "Desarrollador Senior", area: "Tecnología", departamentoId: "IT"
+    });
+  });
+
+  it("retirar incluye el motivo cuando se envía", async () => {
+    const publicador = publicadorEspia();
+    const servicio = crearServicioEmpleados(
+      crearRepositorioEmpleadosEnMemoria(), clienteDepartamentosFalso(), publicador);
+    await servicio.registrar(EMPLEADO_VALIDO);
+    await servicio.retirar("E001", "RENUNCIA");
+
+    assert.equal(publicador.publicados.at(-1).data.motivo, "RENUNCIA");
+  });
+
+  it("retirar no publica nada si el empleado ya estaba retirado", async () => {
+    const publicador = publicadorEspia();
+    const servicio = crearServicioEmpleados(
+      crearRepositorioEmpleadosEnMemoria(), clienteDepartamentosFalso(), publicador);
+    await servicio.registrar(EMPLEADO_VALIDO);
+    await servicio.retirar("E001");
+    publicador.publicados.length = 0;
+
+    await assert.rejects(() => servicio.retirar("E001"), (e) => e instanceof AppError && e.codigoEstado === 400);
+    assert.equal(publicador.publicados.length, 0);
+  });
+});

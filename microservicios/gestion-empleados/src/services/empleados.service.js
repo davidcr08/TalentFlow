@@ -1,6 +1,25 @@
 const { AppError } = require("../errores");
 const { crearEmpleado } = require("../dominio/empleado");
 
+// Cargas de los eventos según el Catálogo de Eventos (secciones 3.1 a 3.3): solo los campos
+// del contrato, con empleadoId (no "id").
+function cargaEmpleado(e) {            // 3.1 empleado.creado / 3.2 empleado.actualizado
+  return {
+    empleadoId: e.id,
+    nombre: e.nombre,
+    apellido: e.apellido,
+    email: e.email,
+    cargo: e.cargo,
+    area: e.area,
+    departamentoId: e.departamentoId
+  };
+}
+
+function cargaRetiro(e, motivo) {      // 3.3 empleado.retirado
+  const carga = { empleadoId: e.id, email: e.email, fechaRetiro: e.fechaRetiro };
+  if (motivo) carga.motivo = motivo;
+  return carga;
+}
 function crearServicioEmpleados
 (repositorio, clienteDepartamentos, publicadorEventos = null) {
   async function registrar(datos) {
@@ -45,12 +64,7 @@ function crearServicioEmpleados
 
 if (publicadorEventos) {
   try {
-    await publicadorEventos.publicar("empleado.creado", {
-  empleadoId: empleadoGuardado.id,
-  email: empleadoGuardado.email,
-  nombre: empleadoGuardado.nombre,
-  apellido: empleadoGuardado.apellido
-});
+    await publicadorEventos.publicar("empleado.creado", cargaEmpleado(empleadoGuardado));
   } catch (error) {
     console.error(
       "No se pudo publicar el evento empleado.creado:",
@@ -135,7 +149,7 @@ return empleadoGuardado;
     try {
       await publicadorEventos.publicar(
         "empleado.actualizado",
-        empleadoActualizado
+        cargaEmpleado(empleadoActualizado)
       );
     } catch (error) {
       console.error(
@@ -151,7 +165,7 @@ return empleadoGuardado;
 
   //Reto 04 
   
-async function retirar(id) {
+async function retirar(id, motivo) {
   const existente = await repositorio.buscarPorId(id);
 
   if (!existente) {
@@ -172,7 +186,7 @@ async function retirar(id) {
     try {
       await publicadorEventos.publicar(
         "empleado.retirado",
-        empleadoRetirado
+        cargaRetiro(empleadoRetirado, motivo)
       );
     } catch (error) {
       console.error(

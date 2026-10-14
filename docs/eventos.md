@@ -53,3 +53,14 @@ Política de confirmación (igual en los tres servicios):
 | procesado / duplicado / evento ajeno | `ack` |
 | mensaje inválido (JSON roto, faltan campos) | `reject` sin reencolar (la DLQ formal es del Reto 29) |
 | fallo transitorio (p. ej. BD caída) | pausa de 2 s y `nack` con reencolado |
+
+## Carga de los eventos de empleado
+
+`empleados-service` publica solo los campos del catálogo (3.1 a 3.3), con `empleadoId` (copia de `id`):
+
+| Evento | `data` |
+|---|---|
+| `empleado.creado` / `empleado.actualizado` | `empleadoId, nombre, apellido, email, cargo, area, departamentoId` |
+| `empleado.retirado` | `empleadoId, email, fechaRetiro` (+ `motivo` si el `DELETE` lo trae en el cuerpo) |
+
+Sin `empleadoId` y `email` los consumidores rechazan el mensaje como inválido.
