@@ -159,14 +159,16 @@ func (s *Store) ProcesarEvento(ctx context.Context, eventoID string, efecto func
 }
 
 // CrearPerfilTx crea el perfil por defecto. Si ya existe uno para ese empleado no hace nada.
+
 func CrearPerfilTx(ctx context.Context, tx *sql.Tx, d dominio.DatosEmpleado) error {
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO perfiles (id, empleado_id, nombre, apellido, email, cargo, area, departamento_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (empleado_id) DO NOTHING`,
-		nuevoUUID(), d.EmpleadoID, d.Nombre, d.Apellido, d.Email, d.Cargo, d.Area, d.DepartamentoID)
-	return err
+    _, err := tx.ExecContext(ctx, `
+        INSERT INTO perfiles (id, empleado_id)
+        VALUES ($1, $2)
+        ON CONFLICT (empleado_id) DO NOTHING`,
+        nuevoUUID(), d.EmpleadoID)
+    return err
 }
+
 
 // SincronizarTx actualiza los campos replicados. Si el perfil aún no existe (el
 // empleado.creado no llegó), lo crea con esos datos en lugar de perder la información.

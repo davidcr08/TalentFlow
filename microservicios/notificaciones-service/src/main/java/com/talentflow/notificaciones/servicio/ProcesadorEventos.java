@@ -12,17 +12,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Procesa un mensaje del broker: valida, deduplica por id de mensaje, registra la notificación
+ * Procesa un mensaje del broker: valida, deduplica por id de mensaje, registra
+ * la notificación
  * y "envía" (simula) el correo con un log estructurado.
  *
- * La deduplicación y el registro ocurren en UNA transacción: si el guardado falla, el id del
- * mensaje no queda marcado y la reentrega del broker reintenta; si el mensaje llega duplicado,
- * el INSERT en eventos_procesados no inserta nada y se descarta sin repetir el efecto.
+ * La deduplicación y el registro ocurren en UNA transacción: si el guardado
+ * falla, el id del
+ * mensaje no queda marcado y la reentrega del broker reintenta; si el mensaje
+ * llega duplicado,
+ * el INSERT en eventos_procesados no inserta nada y se descarta sin repetir el
+ * efecto.
  */
 @Service
 public class ProcesadorEventos {
 
-    public enum Resultado { PROCESADO, DUPLICADO, IGNORADO }
+    public enum Resultado {
+        PROCESADO, DUPLICADO, IGNORADO
+    }
 
     private static final Logger log = LoggerFactory.getLogger(ProcesadorEventos.class);
 
@@ -32,7 +38,7 @@ public class ProcesadorEventos {
     private final TransactionTemplate transaccion;
 
     public ProcesadorEventos(EventoParser parser, ConstructorNotificaciones constructor,
-                             NotificacionRepository repositorio, TransactionTemplate transaccion) {
+            NotificacionRepository repositorio, TransactionTemplate transaccion) {
         this.parser = parser;
         this.constructor = constructor;
         this.repositorio = repositorio;

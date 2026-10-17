@@ -8,7 +8,10 @@ import com.talentflow.notificaciones.eventos.EventoInvalidoException;
 import java.util.Optional;
 import org.springframework.stereotype.Component;
 
-/** Traduce un evento del catálogo a la notificación que corresponde (función pura, sin I/O). */
+/**
+ * Traduce un evento del catálogo a la notificación que corresponde (función
+ * pura, sin I/O).
+ */
 @Component
 public class ConstructorNotificaciones {
 
