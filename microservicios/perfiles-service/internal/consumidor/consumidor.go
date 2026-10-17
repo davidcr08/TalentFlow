@@ -27,19 +27,16 @@ func (c *Consumidor) Manejar(ctx context.Context, cuerpo []byte) (string, error)
 
 	var efecto func(tx *sql.Tx) error
 	switch env.Type {
-	case eventos.EmpleadoCreado:
-		datos, err := env.DatosEmpleado()
-		if err != nil {
-			return "", err
-		}
-		efecto = func(tx *sql.Tx) error { return store.CrearPerfilTx(ctx, tx, datos) }
+	 
 
 	case eventos.EmpleadoActualizado:
 		datos, err := env.DatosEmpleado()
 		if err != nil {
 			return "", err
 		}
-		efecto = func(tx *sql.Tx) error { return store.SincronizarTx(ctx, tx, datos) }
+		 efecto = func(tx *sql.Tx) error {
+        return store.SincronizarTx(ctx, tx, datos)
+    }
 
 	case eventos.EmpleadoRetirado:
 		empleadoID, err := env.EmpleadoIDRetirado()
