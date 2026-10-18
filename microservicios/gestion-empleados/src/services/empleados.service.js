@@ -1,7 +1,27 @@
 const { AppError } = require("../errores");
 const { crearEmpleado } = require("../dominio/empleado");
 
-function crearServicioEmpleados(repositorio, clienteDepartamentos) {
+// Cargas de los eventos según el Catálogo de Eventos (secciones 3.1 a 3.3): solo los campos
+// del contrato, con empleadoId (no "id").
+function cargaEmpleado(e) {            // 3.1 empleado.creado / 3.2 empleado.actualizado
+  return {
+    empleadoId: e.id,
+    nombre: e.nombre,
+    apellido: e.apellido,
+    email: e.email,
+    cargo: e.cargo,
+    area: e.area,
+    departamentoId: e.departamentoId
+  };
+}
+
+function cargaRetiro(e, motivo) {      // 3.3 empleado.retirado
+  const carga = { empleadoId: e.id, email: e.email, fechaRetiro: e.fechaRetiro };
+  if (motivo) carga.motivo = motivo;
+  return carga;
+}
+function crearServicioEmpleados
+(repositorio, clienteDepartamentos, publicadorEventos = null) {
   async function registrar(datos) {
     const empleado = crearEmpleado(datos);
 
@@ -40,8 +60,145 @@ function crearServicioEmpleados(repositorio, clienteDepartamentos) {
     // reconciliarPendientes() la revise cuando el servicio se restablezca.
     empleado.validacionDepartamento = resultadoDepto === "PENDIENTE" ? "PENDIENTE" : "ACEPTADO";
 
-    return repositorio.guardar(empleado);
+    const empleadoGuardado = await repositorio.guardar(empleado);
+
+if (publicadorEventos) {
+  try {
+    await publicadorEventos.publicar("empleado.creado", cargaEmpleado(empleadoGuardado));
+  } catch (error) {
+    console.error(
+      "No se pudo publicar el evento empleado.creado:",
+      error.message
+    );
   }
+}
+
+return empleadoGuardado;
+  }
+
+
+
+
+  
+  async function actualizar(id, datos) {
+  // El empleado debe existir antes de intentar actualizarlo.
+  const existente = await repositorio.buscarPorId(id);
+
+  if (!existente) {
+    throw new AppError(`El empleado con id ${id} no existe`, 404);
+  }
+
+  // El ID de la URL prevalece sobre cualquier ID enviado en el cuerpo.
+  const empleado = crearEmpleado({ ...datos, id });
+
+  // Evita duplicados, permitiendo conservar los datos del propio empleado.
+  const emailYaExiste = await repositorio.buscarPorEmail(empleado.email);
+
+  if (emailYaExiste && emailYaExiste.id !== id) {
+    throw new AppError(`El email ${empleado.email} ya está registrado`, 400, [
+      { field: "email", message: "Ya está registrado", rejectedValue: empleado.email }
+    ]);
+  }
+
+  const numeroYaExiste = await repositorio.buscarPorNumeroEmpleado(
+    empleado.numeroEmpleado
+  );
+
+  if (numeroYaExiste && numeroYaExiste.id !== id) {
+    throw new AppError(
+      `El numeroEmpleado ${empleado.numeroEmpleado} ya está registrado`,
+      400,
+      [
+        {
+          field: "numeroEmpleado",
+          message: "Ya está registrado",
+          rejectedValue: empleado.numeroEmpleado
+        }
+      ]
+    );
+  }
+
+  const resultadoDepto = await clienteDepartamentos.existe(
+    empleado.departamentoId
+  );
+
+  if (resultadoDepto === "NO_EXISTE") {
+    throw new AppError(
+      `El departamento ${empleado.departamentoId} no existe`,
+      400,
+      [
+        {
+          field: "departamentoId",
+          message: "No existe",
+          rejectedValue: empleado.departamentoId
+        }
+      ]
+    );
+  }
+
+  empleado.validacionDepartamento =
+    resultadoDepto === "PENDIENTE" ? "PENDIENTE" : "ACEPTADO";
+
+  const empleadoActualizado = await repositorio.actualizar(id, empleado);
+
+  if (!empleadoActualizado) {
+    throw new AppError(`El empleado con id ${id} no existe`, 404);
+  }
+
+  if (publicadorEventos) {
+    try {
+      await publicadorEventos.publicar(
+        "empleado.actualizado",
+        cargaEmpleado(empleadoActualizado)
+      );
+    } catch (error) {
+      console.error(
+        "No se pudo publicar el evento empleado.actualizado:",
+        error.message
+      );
+    }
+  }
+
+  return empleadoActualizado;
+}
+
+
+  //Reto 04 
+  
+async function retirar(id, motivo) {
+  const existente = await repositorio.buscarPorId(id);
+
+  if (!existente) {
+    throw new AppError(`El empleado con id ${id} no existe`, 404);
+  }
+
+  if (existente.estado === "RETIRADO") {
+    throw new AppError(`El empleado con id ${id} ya está retirado`, 400);
+  }
+
+  const empleadoRetirado = await repositorio.retirar(id);
+
+  if (!empleadoRetirado) {
+    throw new AppError(`No se pudo retirar el empleado con id ${id}`, 409);
+  }
+
+  if (publicadorEventos) {
+    try {
+      await publicadorEventos.publicar(
+        "empleado.retirado",
+        cargaRetiro(empleadoRetirado, motivo)
+      );
+    } catch (error) {
+      console.error(
+        "No se pudo publicar el evento empleado.retirado:",
+        error.message
+      );
+    }
+  }
+
+  return empleadoRetirado;
+}
+
 
   // Se ejecuta cuando departamentos-service se restablece (Circuit Breaker -> CLOSED).
   // Revisa cada empleado que quedó PENDIENTE y lo mueve a ACEPTADO o RECHAZADO según
@@ -74,12 +231,14 @@ function crearServicioEmpleados(repositorio, clienteDepartamentos) {
     return empleado;
   }
 
-  async function listar() {
-    return repositorio.listar();
+  async function listar(estado, desde, hasta) {
+      return repositorio.listar(estado, desde, hasta);
   }
 
   return {
     registrar,
+    actualizar,
+    retirar,
     consultarPorId,
     listar,
     reconciliarPendientes

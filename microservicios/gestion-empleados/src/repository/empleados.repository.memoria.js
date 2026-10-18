@@ -6,7 +6,20 @@ function crearRepositorioEmpleadosEnMemoria() {
       empleados.set(empleado.id, empleado);
       return empleado;
     },
+    
+    actualizar(id, empleado) {
+      if (!empleados.has(id)) return null;
+      empleados.set(id, { ...empleado, id });
+      return empleados.get(id);
+    },
 
+    retirar(id) {
+      const empleado = empleados.get(id);
+      if (!empleado || empleado.estado === "RETIRADO") return null;
+      const retirado = { ...empleado, estado: "RETIRADO", fechaRetiro: new Date().toISOString() };
+      empleados.set(id, retirado);
+      return retirado;
+    },
     buscarPorId(id) {
       return empleados.get(id) ?? null;
     },

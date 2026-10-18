@@ -20,9 +20,13 @@ CREATE TABLE IF NOT EXISTS empleados (
     -- (ver reconciliarPendientes() en services/empleados.service.js).
     validacion_departamento VARCHAR(20) NOT NULL DEFAULT 'ACEPTADO'
                        CHECK (validacion_departamento IN ('PENDIENTE', 'ACEPTADO', 'RECHAZADO')),
-    creado_en         TIMESTAMP    NOT NULL DEFAULT now()
+    creado_en         TIMESTAMP    NOT NULL DEFAULT now(),
+    fecha_retiro      TIMESTAMP    NULL     
 );
 
 CREATE INDEX IF NOT EXISTS idx_empleados_departamento_id ON empleados (departamento_id);
 CREATE INDEX IF NOT EXISTS idx_empleados_email ON empleados (email);
 CREATE INDEX IF NOT EXISTS idx_empleados_validacion_departamento ON empleados (validacion_departamento);
+
+ALTER TABLE empleados
+ADD COLUMN IF NOT EXISTS fecha_retiro TIMESTAMP NULL;

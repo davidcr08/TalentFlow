@@ -3,6 +3,10 @@ const { crearServicioEmpleados } = require("./services/empleados.service");
 const { crearRepositorioEmpleadosPostgres } = require("./repository/empleados.repository.postgres");
 const { crearClienteDepartamentos } = require("./clients/departamentos.client");
 const { crearPool } = require("./db/pool");
+const { crearPublicadorEventos } = require("./events/publicador-eventos");
+
+
+
 
 const PUERTO = process.env.PORT || 8080;
 const DEPARTAMENTOS_SERVICE_URL =
@@ -10,6 +14,8 @@ const DEPARTAMENTOS_SERVICE_URL =
 
 const pool = crearPool();
 const repositorio = crearRepositorioEmpleadosPostgres(pool);
+
+
 const clienteDepartamentos = crearClienteDepartamentos({
   baseUrl: DEPARTAMENTOS_SERVICE_URL,
   timeoutMs: process.env.DEPARTAMENTOS_TIMEOUT_MS
@@ -19,10 +25,22 @@ const clienteDepartamentos = crearClienteDepartamentos({
     ? Number(process.env.DEPARTAMENTOS_MAX_REINTENTOS)
     : 3
 });
-const servicio = crearServicioEmpleados(repositorio, clienteDepartamentos);
-const app = crearApp(servicio, clienteDepartamentos, {
-  verificarBaseDeDatos: () => pool.query("SELECT 1")
-});
+
+
+//RETO 4
+const publicadorEventos = crearPublicadorEventos();
+const servicio = crearServicioEmpleados(
+  repositorio,
+  clienteDepartamentos,
+  publicadorEventos
+);
+const app = crearApp(
+  servicio,
+  clienteDepartamentos,
+  {
+    verificarBaseDeDatos: () => pool.query("SELECT 1")
+  }
+);
 
 // Cuando el Circuit Breaker vuelve a CERRAR (departamentos-service se restableció),
 // revisa automáticamente a los empleados que quedaron PENDIENTE y los mueve a
