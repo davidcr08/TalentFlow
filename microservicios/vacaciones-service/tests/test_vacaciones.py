@@ -99,12 +99,12 @@ def test_validacion_fechas_iguales_tambien_son_incoherentes(entorno):
 
 
 def test_validacion_fecha_en_el_pasado(entorno):
-    client, app, _, _ = entorno
+    client, app, broker, _ = entorno
     alta_empleado(client, app)
     r = programar(client, inicio="2026-10-09", fin="2026-10-20")  # "hoy" simulado: 2026-10-10
     assert r.status_code == 400
     assert "anterior a la fecha actual" in r.json()["message"]
-
+    assert broker.publicados == []
 
 def test_inicio_hoy_es_valido(entorno):
     client, app, _, _ = entorno
@@ -113,7 +113,7 @@ def test_inicio_hoy_es_valido(entorno):
 
 
 def test_validacion_solapamiento_incluye_periodo_en_conflicto(entorno):
-    client, app, _, _ = entorno
+    client, app, broker, _ = entorno
     alta_empleado(client, app)
     primero = programar(client, inicio="2027-06-15", fin="2027-06-30").json()
 
@@ -123,7 +123,7 @@ def test_validacion_solapamiento_incluye_periodo_en_conflicto(entorno):
     cuerpo = r.json()
     assert cuerpo["periodoEnConflicto"]["id"] == primero["id"]
     assert primero["id"] in cuerpo["message"]
-
+    assert [d["vacacionesId"] for _, d in broker.publicados] == [primero["id"]]
 
 @pytest.mark.parametrize(
     "inicio,fin,esperado",
@@ -190,7 +190,7 @@ def test_validacion_empleado_inexistente(entorno):
 
 
 def test_empleado_retirado_no_puede_programar(entorno):
-    client, app, _, _ = entorno
+    client, app, broker, _ = entorno
     alta_empleado(client, app)
     consumidor = ConsumidorEmpleados(app.state.repo)
     client.portal.call(
@@ -201,6 +201,8 @@ def test_empleado_retirado_no_puede_programar(entorno):
     r = programar(client)
     assert r.status_code == 400
     assert "RETIRADO" in r.json()["message"]
+    assert broker.publicados == []
+    assert client.get("/vacaciones", params={"empleadoId": "E001"}).json() == []
 
 
 def test_validacion_de_formato_responde_400(entorno):
@@ -255,10 +257,9 @@ def test_no_se_cancela_un_periodo_que_ya_inicio(entorno):
     reloj.ahora = datetime(2026, 10, 20, 8, 0, tzinfo=ZONA)  # llegó la fechaInicio
 
     r = client.delete(f"/vacaciones/{id_}")
-    assert r.status_code == 409
+    assert r.status_code == 400
     assert "ya inició" in r.json()["message"]
-
-
+    assert client.get(f"/vacaciones/{id_}").json()["estado"] == "PROGRAMADA"  # no se tocó
 # ------------------------------------------------------------ eventos / deduplicación
 
 def test_replica_se_alimenta_con_empleado_creado(entorno):

@@ -150,10 +150,11 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-talentflow}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-talentflow_dev}
+    # El broker SÍ publica puertos (Prueba 9 exige su UI), pero solo en loopback para no
+    # exponer RabbitMQ a la red: 5672 = AMQP, 15672 = interfaz de administración.
     ports:
+      - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
-    expose:
-      - "5672"
     volumes:
       - vol-rabbitmq:/var/lib/rabbitmq
     networks:

@@ -122,15 +122,16 @@ class VacacionesService:
             fila = await self.repo.obtener(conn, id_, para_actualizar=True)
             if fila is None:
                 raise AppError(f"No existe el período de vacaciones {id_}", 404)
-            if fila["estado"] != "PROGRAMADA":
+            if fila["estado"] == "CANCELADA":
+                raise AppError(f"El período {id_} ya está CANCELADA", 409)
+            # RF-26: un período que ya inició (en curso, finalizado o con fechaInicio ya
+            # llegada) no se cancela -> 400.
+            if fila["estado"] != "PROGRAMADA" or fila["fecha_inicio"] <= hoy:
                 raise AppError(
-                    f"El período {id_} está {fila['estado']}: solo se puede cancelar uno PROGRAMADA",
-                    409,
-                )
-            if fila["fecha_inicio"] <= hoy:
-                raise AppError(
-                    f"El período {id_} ya inició el {fila['fecha_inicio']}: no se puede cancelar",
-                    409,
+                    f"El período {id_} ya inició (estado {fila['estado']}, fechaInicio "
+                    f"{fila['fecha_inicio']}): solo se cancelan períodos que no han iniciado",
+                    400,
+                    [{"campo": "id", "mensaje": "el período ya inició"}],
                 )
             fila = await self.repo.marcar_cancelada(conn, id_)
         return periodo_a_dto(fila)
