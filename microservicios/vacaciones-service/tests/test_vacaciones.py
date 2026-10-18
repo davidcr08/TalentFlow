@@ -159,6 +159,28 @@ def test_periodo_cancelado_no_bloquea_fechas(entorno):
     assert programar(client).status_code == 201
 
 
+def test_periodo_finalizado_no_bloquea_fechas(entorno):
+    client, app, _, _ = entorno
+    alta_empleado(client, app)
+
+    async def insertar_finalizada():
+        async with app.state.repo.transaccion() as conn:
+            await conn.execute(
+                """
+                INSERT INTO vacaciones
+                    (id, empleado_id, fecha_inicio, fecha_fin, estado)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                ("V-RF28-FIN", "E001", "2027-03-15", "2027-03-30", "FINALIZADA"),
+            )
+
+    client.portal.call(insertar_finalizada)
+
+    respuesta = programar(client)
+
+    assert respuesta.status_code == 201
+
+
 def test_validacion_empleado_inexistente(entorno):
     client, _, broker, _ = entorno
     r = programar(client, empleado="NO-EXISTE")
