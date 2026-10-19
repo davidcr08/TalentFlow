@@ -109,7 +109,7 @@ Go para perfiles (servicio ligero de eventos + REST); Java/Spring para notificac
 
 Se eligió RabbitMQ porque (1) un exchange `topic` mapea 1:1 el catálogo, (2) la UI de administración permite publicar a mano el mismo
 mensaje dos veces (verificación exigida), (3) el ack/nack y la reentrega son justo lo que exige la deduplicación, y (4) el volumen no justifica Kafka.
-UI: <http://localhost:15672> (solo en loopback; usuario/clave en `.env`, por defecto `talentflow` / `talentflow_dev`). El puerto 5672 no se publica.
+UI: <http://localhost:15672> (solo en loopback; usuario/clave en `.env`, por defecto `talentflow` / `talentflow_dev`). El broker publica `5672` (AMQP) y `15672` (UI), ambos solo en loopback (`127.0.0.1`); los servicios nuevos solo usan `expose`.
 
 ### Eventos
 
@@ -132,8 +132,36 @@ Además la réplica guarda el email de `empleado.creado`: si luego cambia (`empl
 lista como consumidor — ver `docs/eventos.md`.
 
 Reglas: 4 validaciones → `400` (fechas incoherentes, pasadas, solapamiento —incluye `periodoEnConflicto`—, empleado inexistente o RETIRADO).
-`DELETE` cancela (estado `CANCELADA`, no borra) solo períodos PROGRAMADA cuyo inicio no ha llegado; si no, `409`.
+`DELETE` cancela (estado `CANCELADA`, no borra) solo períodos que no han iniciado; si ya inició (EN_CURSO, FINALIZADA o `fechaInicio` ya llegada) responde `400`, y `409` si ya estaba CANCELADA.
 `diasHabiles` = lunes a viernes inclusive, sin festivos. Ojo: el catálogo ejemplifica 12 días para 15–30 mar 2026, que con L–V da 11 (el ejemplo es ilustrativo).
+
+### Garantías de entrega, disponibilidad y persistencia (RNF-03 a RNF-21)
+
+| RNF | Garantía | Dónde se cumple |
+|---|---|---|
+| RNF-03 | **Vacaciones no conoce cuentas ni autenticación**: no maneja usuarios, tokens ni sesiones; solo valida el período y publica `vacaciones.programadas`. La desactivación de cuentas (Reto 5) la hará otro servicio al consumir el evento. | `vacaciones-service` (no hay código ni tablas de cuentas) |
+| RNF-04 | **Idempotencia por `id` del envelope**: cada consumidor guarda el id en `eventos_procesados(id, procesado_en)`. Una reentrega no inserta (`ON CONFLICT DO NOTHING`) y se confirma sin repetir el efecto. | notificaciones, perfiles y vacaciones (opción b) |
+| RNF-05 | **El ack se envía solo después de procesar**, y el efecto + el registro del id van en la **misma transacción** de BD: si el efecto falla, el id también se deshace y el broker reentrega. | `ProcesadorEventos` (Java), `Store.ProcesarEvento` (Go), `ConsumidorEmpleados.manejar` (Python) |
+| RNF-06 | **La publicación ocurre después del commit.** Si publicar falla, se registra el error y **no se revierte la BD** (el período / empleado queda guardado). | `VacacionesService.programar` (Python), `empleados.service.js` (Node) |
+| RNF-07 | **Colas durables y mensajes persistentes**: exchange y colas se declaran `durable`; los productores publican con `delivery_mode=2` / `persistent: true`; RabbitMQ guarda sus datos en el volumen `vol-rabbitmq`. Un consumidor caído no pierde eventos: quedan en su cola hasta que vuelva. | `BrokerConfig` (Java), `broker.go` (Go), `broker.py` (Python), `publicador-eventos.js` (Node) |
+| RNF-08 | **Productor y consumidores reintentan la conexión**: perfiles reintenta cada 3 s indefinidamente; vacaciones usa `connect_robust` con bucle de reintento al arrancar; notificaciones usa la reconexión de Spring AMQP; empleados reabre conexión/canal en la siguiente publicación y reintenta una vez. En Compose, el broker tiene healthcheck (`rabbitmq-diagnostics ping`) y los servicios usan `depends_on: condition: service_healthy`, así que **un solo comando** (`docker compose up --build -d`) levanta todo en orden. | `docker-compose.yml` y los clientes del broker |
+| RNF-09 | **BD propia y volumen propio por servicio nuevo**: `database-perfiles` (`vol-perfiles`), `database-notificaciones` (`vol-notificaciones`) y `database-vacaciones` (`vol-vacaciones`), cada una con su usuario y su `init.sql`. Los datos persisten tras `docker compose down` / reinicio; solo `down -v` los borra. | `docker-compose.yml` |
+| RNF-10 | **Toda la configuración por variables de entorno** (broker, credenciales, URLs, BD): los servicios leen `BROKER_URL`/`BROKER_HOST`, `DB_*`, `PORT`, `BROKER_EXCHANGE`, etc. (ver `config.go`, `config.py`, `application.yml`); Compose las inyecta con valores tomados de `.env`. `.env.example` lista todas las variables que se pueden cambiar. | `docker-compose.yml`, `.env.example` |
+| RNF-11 | **Despliegue completo con un comando**: `docker compose up --build -d` construye y levanta gateway, 5 servicios, 4 bases de datos y el broker, en el orden correcto. Funciona incluso sin `.env` (hay valores por defecto). | `docker-compose.yml` |
+| RNF-12 | **Servicios nuevos con `expose`, nunca `ports`**: perfiles, notificaciones y vacaciones solo son alcanzables dentro de la red de Docker (y por el Gateway). El **broker sí publica `5672` y `15672`** (la Prueba 9 exige su UI), ambos solo en `127.0.0.1`. | `docker-compose.yml` |
+| RNF-13 | **Dockerfile propio por servicio**: uno en cada carpeta de `microservicios/`. | `microservicios/*/Dockerfile` |
+| RNF-14 | **Lenguajes distintos**: Notificaciones = Java, Perfiles = Go, Vacaciones = Python, distintos entre sí y de Node (gateway, empleados) y PHP (departamentos): 5 lenguajes en total (mínimo 4). Tabla en la sección *Servicio ↔ lenguaje*. | README |
+| RNF-15 | **Nombres, envelope y payloads del Catálogo, sin modificar**: envelope `{ id, type, version, occurredAt, producer, data }` en los cuatro productores/consumidores; `data` con `empleadoId` (no `id`) y los campos que define el Catálogo de Eventos (sección 3). | `publicador-eventos.js`, `eventos.py`, `eventos.go`, `Envelope.java` |
+| RNF-16 | **`id` único (UUID) y estable ante reentregas**: se genera una sola vez al construir el evento (`randomUUID` / `uuid4`) y viaja también como `message_id`; una reentrega del broker conserva el mismo `id`, que es la clave de la deduplicación. `occurredAt` siempre en ISO 8601 UTC sin fracciones (`2026-03-01T14:32:05Z`). | productores |
+| RNF-17 | **El retiro es una transición de estado y conserva el historial**: `DELETE /empleados/{id}` cambia `estado` a `RETIRADO` y guarda `fechaRetiro`; no borra. La auditoría es de solo lectura: `GET /empleados?estado=RETIRADO[&desde=&hasta=]`. Perfiles también se **archiva**, no se borra. | `empleados.service.js`, `perfiles-service` |
+| RNF-18 | **OpenAPI/Swagger en los 3 servicios nuevos**, alcanzable **a través del Gateway** (que es el único con puerto publicado): `/perfiles/docs`, `/notificaciones/docs` y `/vacaciones/docs`. | ver *Swagger UI* |
+| RNF-19 | **Formato de error único** `{ status, error, message, timestamp, path, errors? }` en los tres servicios, igual que el Reto 2. | `api.go`, `main.py`, `ManejadorErrores.java` |
+| RNF-20 | **No regresión**: no se cambiaron contratos de los Retos 1–3 (rutas, códigos y cuerpos de `/empleados` y `/departamentos`); sus pruebas siguen ejecutándose con `npm test`. | `gestion-empleados/tests` |
+| RNF-21 | **Log estructurado por evento publicado o consumido** con `id` y `type`: empleados registra `Evento publicado` (JSON); vacaciones también al publicar; perfiles, notificaciones y vacaciones registran el `messageId` y el resultado (`procesado` / `duplicado` / `ignorado`) al consumir. Es la evidencia de la deduplicación. | los cinco servicios |
+
+Política de confirmación (igual en los tres consumidores): procesado, duplicado o ignorado → `ack`; mensaje inválido → `reject` sin reencolar; fallo transitorio (BD caída) → pausa y `nack` con reencolado.
+
+**Limitación aceptada (RNF-06).** Entre el commit y la publicación hay una ventana: si el proceso cae o el broker no responde justo ahí, el dato queda guardado pero **el evento se pierde** (nadie se entera: no habrá notificación ni perfil). Se acepta en este reto a cambio de no acoplar la BD a la disponibilidad del broker. La solución real es el patrón **outbox** (escribir el evento en una tabla dentro de la misma transacción y publicarlo desde allí), que se verá más adelante.
 
 ### Swagger UI (a través del Gateway, sin agregar rutas)
 
@@ -147,9 +175,17 @@ bash docs/reto-04/demo.sh          # ver el encabezado del script
 docker compose logs notificaciones-service | grep NOTIFICACI
 ```
 
-Hasta que `empleados-service` publique eventos, el script publica `empleado.*` directo al broker. Para **la prueba de deduplicación a mano**: en la UI de RabbitMQ →
+`empleados-service` ya publica `empleado.creado`, `empleado.actualizado` y `empleado.retirado`; con `SIMULAR_EMPLEADOS=0` el script usa el REST real, y con el valor por defecto publica `empleado.*` directo al broker. Para **la prueba de deduplicación a mano**: en la UI de RabbitMQ →
 Exchanges → `talentflow.events` → *Publish message*, routing key `empleado.creado`, propiedad `message_id` y `id` del JSON iguales, publicar **dos veces** y comprobar
-`GET /notificaciones/{empleadoId}` (una) y `GET /perfiles/{empleadoId}`. Pegar aquí la evidencia:
+`GET /notificaciones/{empleadoId}` (una) y `GET /perfiles/{empleadoId}`. Cada consumidor deja un log por mensaje con su `id` y el resultado
+(`procesado` la primera vez, `duplicado` la segunda). Para capturar la evidencia:
+
+```bash
+docker compose logs perfiles-service notificaciones-service vacaciones-service | grep -i -E "duplicado|procesado"
+curl -s http://localhost:8080/notificaciones/E777      # debe devolver UNA sola notificación
+```
+
+Evidencia (pegar aquí la salida real de esos comandos):
 
 ```
 (pendiente: salida real de la prueba)

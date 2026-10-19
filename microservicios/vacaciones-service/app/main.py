@@ -259,10 +259,10 @@ def create_app(
         tags=["Vacaciones"],
         summary="Cancela un período que aún no ha iniciado",
         description=(
-            "Pasa el período a CANCELADA (no se borra). Responde **409** si el período no está "
-            "PROGRAMADA o si su `fechaInicio` ya llegó."
+             "Pasa el período a CANCELADA (no se borra). Responde **400** si el período ya inició "
+            "(EN_CURSO, FINALIZADA o `fechaInicio` ya llegada) y **409** si ya estaba CANCELADA."
         ),
-        responses={404: {"model": ErrorRespuesta}, 409: {"model": ErrorRespuesta}},
+             responses={400: {"model": ErrorRespuesta}, 404: {"model": ErrorRespuesta}, 409: {"model": ErrorRespuesta}},
     )
     async def cancelar(id: str):
         return await servicio.cancelar(id)

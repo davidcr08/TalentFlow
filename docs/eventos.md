@@ -19,9 +19,9 @@ Documento vivo. La fuente de verdad de nombres, productores, consumidores y carg
 
 | Evento | Productor | Consumidores (cola) | Reto |
 |---|---|---|---|
-| `empleado.creado` | empleados-service (⏳ pendiente) | perfiles (`perfiles-service.q`), notificaciones (`notificaciones-service.q`), vacaciones (`vacaciones-service.q`) | 4 |
-| `empleado.actualizado` | empleados-service (⏳ pendiente) | perfiles | 4 |
-| `empleado.retirado` | empleados-service (⏳ pendiente) | perfiles, notificaciones, vacaciones | 4 |
+| `empleado.creado` | empleados-service  ✅ | perfiles (`perfiles-service.q`), notificaciones (`notificaciones-service.q`), vacaciones (`vacaciones-service.q`) | 4 |
+| `empleado.actualizado` | empleados-service  ✅ | perfiles | 4 |
+| `empleado.retirado` | empleados-service  ✅ | perfiles, notificaciones, vacaciones | 4 |
 | `vacaciones.programadas` | **vacaciones-service** ✅ | notificaciones | 4 |
 
 Reacciones: ver README raíz, sección *Reto 4*.
