@@ -96,6 +96,11 @@ services:
       DEPARTAMENTOS_SERVICE_URL: http://departamentos-service:8082
       BROKER_URL: amqp://${RABBITMQ_USER:-talentflow}:${RABBITMQ_PASS:-talentflow_dev}@message-broker:5672/
       BROKER_EXCHANGE: talentflow.events
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-0123456789abcdef}
+      JWT_EXPIRA_SEGUNDOS: ${JWT_EXPIRA_SEGUNDOS:-3600}
+      ADMIN_ID: ${ADMIN_ID:-ADMIN}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@talentflow.local}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin_dev_change_me}
     depends_on:
       database-empleados:
         condition: service_healthy

@@ -3,10 +3,12 @@ const swaggerUi = require("swagger-ui-express");
 
 const { AppError } = require("./errores");
 const { crearRouterEmpleados } = require("./routes/empleados.routes");
+const { crearRouterAuth } = require("./routes/auth.routes");
 const { openapiSpec } = require("./openapi");
 
 const FRASES_ESTADO = {
   400: "Bad Request",
+  401: "Unauthorized",
   404: "Not Found",
   500: "Internal Server Error",
   503: "Service Unavailable"
@@ -17,7 +19,7 @@ const TIMEOUT_HEALTH_DB_MS = 2000;
 function crearApp(
   servicioEmpleados,
   clienteDepartamentos = { estadoActual: () => "DESCONOCIDO" },
-  { verificarBaseDeDatos = async () => {} } = {}
+  { verificarBaseDeDatos = async () => {}, servicioAuth = null } = {}
 ) {
   const app = express();
 
@@ -55,6 +57,11 @@ function crearApp(
       estado: clienteDepartamentos.estadoActual()
     });
   });
+
+  // RF-01: POST /auth/login (solo si hay servicio de autenticación configurado).
+  if (servicioAuth) {
+    app.use(crearRouterAuth(servicioAuth));
+  }
 
   app.use(crearRouterEmpleados(servicioEmpleados));
 
