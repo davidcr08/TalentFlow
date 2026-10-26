@@ -103,4 +103,15 @@ describe("POST /auth/login (RF-01 / RF-02)", () => {
     const vencido = crearEmisorJwt({ secreto: SECRETO, expiracionSegundos: 1, ahora: () => 0 }).emitir({ sub: "x", role: "USER" });
     assert.equal(emisor.verificar(vencido), null);
   });
+
+
+  cuentas.agregar({
+  email: "desactivada@empresa.com",
+  empleadoId: "E004",
+  passwordHash: hash,
+  estado: "DESACTIVADA_PERMANENTE"
+});
+
+
+  
 });

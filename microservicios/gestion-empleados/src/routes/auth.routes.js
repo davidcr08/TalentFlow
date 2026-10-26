@@ -13,6 +13,17 @@ function crearRouterAuth(servicioAuth) {
     }
   });
 
+  // RF-03: solicitud de recuperación de contraseña
+  router.post("/auth/recover-password", async (req, res, next) => {
+  try {
+    const { email } = req.body ?? {};
+    res.status(200).json(await servicioAuth.recuperarPassword(email));
+  } catch (error) {
+    next(error);
+  }
+  }); 
+
+
   return router;
 }
 

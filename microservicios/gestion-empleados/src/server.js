@@ -53,7 +53,12 @@ const admin =
         passwordHash: hashear(process.env.ADMIN_PASSWORD)
       }
     : null;
-const servicioAuth = crearServicioAuth(crearRepositorioCuentasPostgres(pool), emisorJwt, admin);
+const servicioAuth = crearServicioAuth(
+  crearRepositorioCuentasPostgres(pool),
+  emisorJwt,
+  admin,
+  publicadorEventos
+);
 
 const app = crearApp(
   servicio,

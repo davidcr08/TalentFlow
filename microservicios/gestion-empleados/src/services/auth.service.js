@@ -2,10 +2,12 @@ const { AppError } = require("../errores");
 const { verificar, hashear } = require("../auth/password");
 
 const ROLES = Object.freeze({ ADMIN: "ADMIN", USER: "USER" });
+const { randomBytes } = require("node:crypto");
 const ESTADOS_CUENTA = Object.freeze({
   ACTIVA: "ACTIVA",
   INACTIVA: "INACTIVA",
-  SUSPENDIDA_TEMPORAL: "SUSPENDIDA_TEMPORAL"
+  SUSPENDIDA_TEMPORAL: "SUSPENDIDA_TEMPORAL",
+  DESACTIVADA_PERMANENTE: "DESACTIVADA_PERMANENTE"
 });
 
 // RF-01: mismo mensaje para credenciales incorrectas, email inexistente o cuenta no ACTIVA,
@@ -20,8 +22,10 @@ const HASH_RELLENO = hashear("relleno-sin-uso");
  * @param repositorioCuentas  { buscarPorEmail(email) -> { empleadoId, passwordHash, role, estado } | null }
  * @param emisorJwt           resultado de crearEmisorJwt()
  * @param admin               ADMIN semilla opcional: { id, email, passwordHash }
+ * @param publicadorEventos   publicador de eventos opcional, para publicar eventos de login exitoso
+ * 
  */
-function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null) {
+function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicadorEventos = null)  {
   async function buscarCuenta(email) {
     if (admin && admin.email.toLowerCase() === email.toLowerCase()) {
       return {
@@ -67,7 +71,60 @@ function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null) {
     };
   }
 
-  return { login };
+  // reto 5 rf03
+  async function recuperarPassword(email) {
+  if (typeof email !== "string" || !email.trim()) {
+    throw new AppError("Debe enviar un email válido", 400, [
+      { field: "email", message: "Es un campo obligatorio" }
+    ]);
+  }
+
+  const emailNormalizado = email.trim();
+  const cuenta = await buscarCuenta(emailNormalizado);
+
+  // La respuesta no revela si la cuenta existe ni su estado.
+  const respuesta = {
+    message: "Si la cuenta puede recuperar su contraseña, recibirá instrucciones."
+  };
+
+  const estadosPermitidos = [
+    ESTADOS_CUENTA.ACTIVA,
+    ESTADOS_CUENTA.INACTIVA,
+    ESTADOS_CUENTA.SUSPENDIDA_TEMPORAL
+  ];
+
+  // No recuperar cuentas inexistentes, desactivadas permanentemente
+  // ni el ADMIN semilla, que no tiene una cuenta recuperable en la BD.
+  if (
+    !cuenta ||
+    (admin && admin.email.toLowerCase() === emailNormalizado.toLowerCase()) ||
+    !estadosPermitidos.includes(cuenta.estado)
+  ) {
+    return respuesta;
+  }
+
+  const tokenRecuperacion = randomBytes(32).toString("hex");
+  const expiraEn = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+
+  if (!publicadorEventos) {
+    throw new AppError("Servicio de recuperación no disponible", 503);
+  }
+
+  try {
+    await publicadorEventos.publicar("usuario.recuperacion", {
+      email: emailNormalizado,
+      tokenRecuperacion,
+      expiraEn
+    });
+  } catch (error) {
+    console.error("No se pudo publicar el evento de recuperación:", error.message);
+    throw new AppError("Servicio de recuperación no disponible", 503);
+  }
+
+  return respuesta;
+}
+
+  return { login, recuperarPassword };
 }
 
 module.exports = { crearServicioAuth, ROLES, ESTADOS_CUENTA, MENSAJE_CREDENCIALES };
