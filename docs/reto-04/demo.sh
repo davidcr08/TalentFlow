@@ -24,7 +24,7 @@ EXCHANGE="talentflow.events"
 SIMULAR_EMPLEADOS="${SIMULAR_EMPLEADOS:-1}"
 
 ANIO=$(( $(date +%Y) + 1 ))
-EMP="E001"
+EMP="susE001"
 EMAIL="juan.perez@empresa.com"
 
 # Identificadores exclusivos para que la prueba de deduplicacion
