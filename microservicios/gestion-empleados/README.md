@@ -158,3 +158,19 @@ Desde el Reto 3 este servicio ya no publica puerto al host (`expose`, no `ports`
 ## Evidencia
 
 Los resultados de las pruebas del Reto 1 se documentan en `docs/reto-01/pruebas.md`.
+
+
+## Autenticación (RF-01 / RF-02)
+
+`POST /auth/login` (también vía Gateway, `http://localhost:8080/auth/login`) recibe `{ "email", "password" }` y responde `200` con
+`{ "accessToken", "tokenType": "Bearer", "expiresIn" }`.
+
+- **401 genérico** (`Credenciales inválidas`) si el email no existe, la contraseña es incorrecta o la cuenta no está `ACTIVA`
+  (`INACTIVA`, `SUSPENDIDA_TEMPORAL`). `400` si falta email o password.
+- **JWT HS256** con exactamente `sub` (empleadoId; para el ADMIN semilla, `ADMIN_ID`), `role` (`ADMIN` | `USER`), `iat` y `exp`.
+  Sin claim `type`, sin contraseña ni hash.
+- **ADMIN semilla**: se configura con `ADMIN_ID`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` (se hashea al arrancar).
+- **Resto de usuarios**: tabla `cuentas` (`empleado_id`, `password_hash` scrypt, `role`, `estado`), ver `init.sql`.
+- Variables: `JWT_SECRET` (≥ 32 caracteres, obligatorio), `JWT_EXPIRA_SEGUNDOS` (default 3600). Ver `.env.example`.
+
+> Si ya tenías el volumen de Postgres creado, `init.sql` no se reejecuta: usa `docker compose down -v` o crea la tabla `cuentas` a mano.

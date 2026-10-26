@@ -57,6 +57,47 @@ const openapiSpec = {
   },
   servers: [{ url: "/" }],
   paths: {
+    "/auth/login": {
+      post: {
+        summary: "Inicia sesión y retorna un JWT de acceso",
+        description:
+          "Verifica email y password. El JWT incluye sub (empleadoId; para el ADMIN semilla, su identificador), role (ADMIN o USER), iat y exp. No incluye el claim type ni datos sensibles. Responde 401 con el mismo mensaje genérico si las credenciales son incorrectas o si la cuenta no está ACTIVA (INACTIVA, SUSPENDIDA_TEMPORAL).",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["email", "password"],
+                properties: {
+                  email: { type: "string", format: "email", example: "juan.perez@empresa.com" },
+                  password: { type: "string", format: "password" }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: {
+            description: "Autenticación exitosa",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    accessToken: { type: "string" },
+                    tokenType: { type: "string", example: "Bearer" },
+                    expiresIn: { type: "integer", example: 3600 }
+                  }
+                }
+              }
+            }
+          },
+          400: { description: "Falta email o password", content: { "application/json": { schema: errorSchema } } },
+          401: { description: "Credenciales inválidas o cuenta no ACTIVA", content: { "application/json": { schema: errorSchema } } }
+        }
+      }
+    },
     "/empleados": {
       post: {
         summary: "Registra un nuevo empleado",

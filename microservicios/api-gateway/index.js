@@ -81,6 +81,16 @@ app.use(
     })
 );
 
+// Auth (RF-01): POST /auth/login lo atiende empleados-service.
+app.use(
+    createProxyMiddleware({
+        target: EMPLEADOS_URL,
+        changeOrigin: true,
+        pathFilter: ['/auth'],
+        on: { error: handleProxyError }
+    })
+);
+
 app.use(
     createProxyMiddleware({
         target: DEPARTAMENTOS_URL,

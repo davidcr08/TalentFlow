@@ -30,3 +30,15 @@ CREATE INDEX IF NOT EXISTS idx_empleados_validacion_departamento ON empleados (v
 
 ALTER TABLE empleados
 ADD COLUMN IF NOT EXISTS fecha_retiro TIMESTAMP NULL;
+
+-- RF-01/RF-02: cuentas de acceso. Una cuenta por empleado; el ADMIN semilla NO vive aquí
+-- (se configura por variables de entorno ADMIN_*). Nunca se guarda la contraseña en claro:
+-- solo el hash scrypt (ver src/auth/password.js).
+CREATE TABLE IF NOT EXISTS cuentas (
+    empleado_id    VARCHAR(20)  PRIMARY KEY REFERENCES empleados (id),
+    password_hash  VARCHAR(300) NOT NULL,
+    role           VARCHAR(10)  NOT NULL DEFAULT 'USER'
+                    CHECK (role IN ('ADMIN', 'USER')),
+    estado         VARCHAR(20)  NOT NULL DEFAULT 'ACTIVA'
+                    CHECK (estado IN ('ACTIVA', 'INACTIVA', 'SUSPENDIDA_TEMPORAL'))
+);

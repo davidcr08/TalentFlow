@@ -4,6 +4,10 @@ const { crearRepositorioEmpleadosPostgres } = require("./repository/empleados.re
 const { crearClienteDepartamentos } = require("./clients/departamentos.client");
 const { crearPool } = require("./db/pool");
 const { crearPublicadorEventos } = require("./events/publicador-eventos");
+const { crearEmisorJwt } = require("./auth/jwt");
+const { hashear } = require("./auth/password");
+const { crearServicioAuth } = require("./services/auth.service");
+const { crearRepositorioCuentasPostgres } = require("./repository/cuentas.repository.postgres");
 
 
 
@@ -34,11 +38,29 @@ const servicio = crearServicioEmpleados(
   clienteDepartamentos,
   publicadorEventos
 );
+// RF-01/RF-02: autenticación. El ADMIN semilla sale de variables de entorno (su
+// contraseña se hashea al arrancar; nunca se guarda en claro). Los demás usuarios viven en
+// la tabla `cuentas`.
+const emisorJwt = crearEmisorJwt({
+  secreto: process.env.JWT_SECRET,
+  expiracionSegundos: process.env.JWT_EXPIRA_SEGUNDOS ? Number(process.env.JWT_EXPIRA_SEGUNDOS) : 3600
+});
+const admin =
+  process.env.ADMIN_EMAIL && process.env.ADMIN_PASSWORD
+    ? {
+        id: process.env.ADMIN_ID || "ADMIN",
+        email: process.env.ADMIN_EMAIL,
+        passwordHash: hashear(process.env.ADMIN_PASSWORD)
+      }
+    : null;
+const servicioAuth = crearServicioAuth(crearRepositorioCuentasPostgres(pool), emisorJwt, admin);
+
 const app = crearApp(
   servicio,
   clienteDepartamentos,
   {
-    verificarBaseDeDatos: () => pool.query("SELECT 1")
+    verificarBaseDeDatos: () => pool.query("SELECT 1"),
+    servicioAuth
   }
 );
 
