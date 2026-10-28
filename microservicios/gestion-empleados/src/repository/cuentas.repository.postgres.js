@@ -26,6 +26,29 @@ function crearRepositorioCuentasPostgres(pool) {
       return aCuenta(resultado.rows[0]);
     },
 
+    //rf-07
+      async buscarAdminSemillaPorEmail(email) {
+      const resultado = await pool.query(
+        `SELECT id, email, password_hash, role, estado
+           FROM admin_semilla
+          WHERE lower(email) = lower($1)`,
+        [email]
+      );
+
+       const fila = resultado.rows[0];
+
+      if (!fila) return null;
+
+    return {
+        empleadoId: fila.id,
+        email: fila.email,
+        passwordHash: fila.password_hash,
+        role: fila.role,
+        estado: fila.estado,
+        versionToken: 0
+      };
+ },
+
     async buscarPorId(empleadoId) {
       const resultado = await pool.query(
         `SELECT ${COLUMNAS}
@@ -56,4 +79,24 @@ function crearRepositorioCuentasPostgres(pool) {
   };
 }
 
-module.exports = { crearRepositorioCuentasPostgres };
+async function inicializarAdminSemilla(pool, { id, email, passwordHash }) {
+  await pool.query(
+    `INSERT INTO admin_semilla (
+       id, email, password_hash, role, estado
+     )
+     VALUES ($1, $2, $3, 'ADMIN', 'ACTIVA')
+     ON CONFLICT (id)
+     DO UPDATE SET
+       email = EXCLUDED.email,
+       password_hash = EXCLUDED.password_hash,
+       role = 'ADMIN',
+       estado = 'ACTIVA',
+       actualizado_en = now()`,
+    [id, email, passwordHash]
+  );
+}
+
+module.exports = {
+  crearRepositorioCuentasPostgres,
+  inicializarAdminSemilla
+};

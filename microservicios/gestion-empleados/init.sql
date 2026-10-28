@@ -52,3 +52,21 @@ ALTER TABLE cuentas ALTER COLUMN estado TYPE VARCHAR(30);
 ALTER TABLE cuentas DROP CONSTRAINT IF EXISTS cuentas_estado_check;
 ALTER TABLE cuentas ADD CONSTRAINT cuentas_estado_check
     CHECK (estado IN ('ACTIVA', 'INACTIVA', 'SUSPENDIDA_TEMPORAL', 'DESACTIVADA_PERMANENTE'));
+
+-- RF-07: administrador semilla persistente.
+CREATE TABLE IF NOT EXISTS admin_semilla (
+    id             VARCHAR(20) PRIMARY KEY,
+    email          VARCHAR(150) NOT NULL UNIQUE,
+    password_hash  VARCHAR(300) NOT NULL,
+    role           VARCHAR(10) NOT NULL DEFAULT 'ADMIN'
+                   CHECK (role = 'ADMIN'),
+    estado         VARCHAR(30) NOT NULL DEFAULT 'ACTIVA'
+                   CHECK (estado IN (
+                       'ACTIVA',
+                       'INACTIVA',
+                       'SUSPENDIDA_TEMPORAL',
+                       'DESACTIVADA_PERMANENTE'
+                   )),
+    creado_en      TIMESTAMP NOT NULL DEFAULT now(),
+    actualizado_en TIMESTAMP NOT NULL DEFAULT now()
+);

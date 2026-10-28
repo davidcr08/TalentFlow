@@ -36,24 +36,44 @@ const HASH_RELLENO = hashear("relleno-sin-uso");
  */
 function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicadorEventos = null)  {
   async function buscarCuenta(email) {
-    if (admin && admin.email.toLowerCase() === email.toLowerCase()) {
+  // RF-07: consultar primero el ADMIN persistido en PostgreSQL.
+  if (typeof repositorioCuentas.buscarAdminSemillaPorEmail === "function") {
+    const adminPersistido =
+      await repositorioCuentas.buscarAdminSemillaPorEmail(email);
+
+    if (adminPersistido) {
       return {
-        identificador: admin.id,
-        passwordHash: admin.passwordHash,
-        role: ROLES.ADMIN,
-        estado: ESTADOS_CUENTA.ACTIVA
+        identificador: adminPersistido.empleadoId,
+        passwordHash: adminPersistido.passwordHash,
+        role: adminPersistido.role,
+        estado: adminPersistido.estado,
+        versionToken: adminPersistido.versionToken
       };
     }
-    const cuenta = await repositorioCuentas.buscarPorEmail(email);
-    if (!cuenta) return null;
+  }
+
+  // Compatibilidad con las pruebas que usan un ADMIN en memoria.
+  if (admin && admin.email.toLowerCase() === email.toLowerCase()) {
     return {
-      identificador: cuenta.empleadoId,
-      passwordHash: cuenta.passwordHash,
-      role: cuenta.role,
-      estado: cuenta.estado,
-      versionToken: cuenta.versionToken
+      identificador: admin.id,
+      passwordHash: admin.passwordHash,
+      role: ROLES.ADMIN,
+      estado: ESTADOS_CUENTA.ACTIVA
     };
   }
+
+  // Usuarios normales.
+  const cuenta = await repositorioCuentas.buscarPorEmail(email);
+  if (!cuenta) return null;
+
+  return {
+    identificador: cuenta.empleadoId,
+    passwordHash: cuenta.passwordHash,
+    role: cuenta.role,
+    estado: cuenta.estado,
+    versionToken: cuenta.versionToken
+  };
+}
 
   async function login(email, password) {
     if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password) {
