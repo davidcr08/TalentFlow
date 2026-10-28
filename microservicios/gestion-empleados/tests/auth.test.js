@@ -22,6 +22,7 @@ describe("POST /auth/login (RF-01 / RF-02)", () => {
     cuentas.agregar({ email: "ana@empresa.com", empleadoId: "E001", passwordHash: hash });
     cuentas.agregar({ email: "inactiva@empresa.com", empleadoId: "E002", passwordHash: hash, estado: "INACTIVA" });
     cuentas.agregar({ email: "susp@empresa.com", empleadoId: "E003", passwordHash: hash, estado: "SUSPENDIDA_TEMPORAL" });
+    cuentas.agregar({ email: "desactivada@empresa.com", empleadoId: "E004", passwordHash: hash, estado: "DESACTIVADA_PERMANENTE" });
 
     const admin = { id: "ADMIN", email: "admin@talentflow.local", passwordHash: hashear("admin-pass") };
     const servicioAuth = crearServicioAuth(cuentas, emisor, admin);
@@ -79,7 +80,8 @@ describe("POST /auth/login (RF-01 / RF-02)", () => {
       { email: "ana@empresa.com", password: "mala" },
       { email: "nadie@empresa.com", password: "clave-correcta" },
       { email: "inactiva@empresa.com", password: "clave-correcta" },
-      { email: "susp@empresa.com", password: "clave-correcta" }
+      { email: "susp@empresa.com", password: "clave-correcta" },
+      { email: "desactivada@empresa.com", password: "clave-correcta" }
     ];
     const mensajes = new Set();
     for (const caso of casos) {
@@ -104,14 +106,4 @@ describe("POST /auth/login (RF-01 / RF-02)", () => {
     assert.equal(emisor.verificar(vencido), null);
   });
 
-
-  cuentas.agregar({
-  email: "desactivada@empresa.com",
-  empleadoId: "E004",
-  passwordHash: hash,
-  estado: "DESACTIVADA_PERMANENTE"
-});
-
-
-  
 });

@@ -39,6 +39,16 @@ CREATE TABLE IF NOT EXISTS cuentas (
     password_hash  VARCHAR(300) NOT NULL,
     role           VARCHAR(10)  NOT NULL DEFAULT 'USER'
                     CHECK (role IN ('ADMIN', 'USER')),
-    estado         VARCHAR(20)  NOT NULL DEFAULT 'ACTIVA'
-                    CHECK (estado IN ('ACTIVA', 'INACTIVA', 'SUSPENDIDA_TEMPORAL'))
+    estado         VARCHAR(30)  NOT NULL DEFAULT 'ACTIVA'
+                    CHECK (estado IN ('ACTIVA', 'INACTIVA', 'SUSPENDIDA_TEMPORAL', 'DESACTIVADA_PERMANENTE')),
+    -- RF-04: versión de los tokens de reset de la cuenta. Cada token lleva la versión vigente al
+    -- emitirse; al usarlo se incrementa y los tokens anteriores quedan obsoletos (un solo uso).
+    token_version  INTEGER      NOT NULL DEFAULT 0
 );
+
+-- Para bases ya creadas (init.sql no se reejecuta sobre un volumen existente):
+ALTER TABLE cuentas ADD COLUMN IF NOT EXISTS token_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE cuentas ALTER COLUMN estado TYPE VARCHAR(30);
+ALTER TABLE cuentas DROP CONSTRAINT IF EXISTS cuentas_estado_check;
+ALTER TABLE cuentas ADD CONSTRAINT cuentas_estado_check
+    CHECK (estado IN ('ACTIVA', 'INACTIVA', 'SUSPENDIDA_TEMPORAL', 'DESACTIVADA_PERMANENTE'));

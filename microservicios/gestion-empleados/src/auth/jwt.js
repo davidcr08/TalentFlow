@@ -5,6 +5,11 @@ const crypto = require("node:crypto");
 // (nunca la contraseña ni su hash).
 const SECRETO_MINIMO = 32;
 
+// RF-04/RF-05: tipo de los tokens de reset (activación inicial y recuperación). Ambos llevan
+// el mismo type; el servicio los distingue por el estado de la cuenta, no por el token.
+const TIPO_RESET_PASSWORD = "RESET_PASSWORD";
+const EXPIRACION_RESET_SEGUNDOS = 15 * 60;
+
 const b64url = (buffer) => Buffer.from(buffer).toString("base64url");
 
 function crearEmisorJwt({ secreto, expiracionSegundos = 3600, ahora = () => Date.now() }) {
@@ -23,6 +28,17 @@ function crearEmisorJwt({ secreto, expiracionSegundos = 3600, ahora = () => Date
       const iat = Math.floor(ahora() / 1000);
       const cabecera = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
       const payload = b64url(JSON.stringify({ sub, role, iat, exp: iat + expiracionSegundos }));
+      return `${cabecera}.${payload}.${firmar(`${cabecera}.${payload}`)}`;
+    },
+
+    // Token de un solo uso lógico: `ver` es la versión de tokens de la cuenta al emitirlo; al
+    // hacer el reset la cuenta incrementa su versión y el token queda obsoleto.
+    emitirReset({ sub, version, expiracionSegundosReset = EXPIRACION_RESET_SEGUNDOS }) {
+      const iat = Math.floor(ahora() / 1000);
+      const cabecera = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+      const payload = b64url(
+        JSON.stringify({ sub, type: TIPO_RESET_PASSWORD, ver: version, iat, exp: iat + expiracionSegundosReset })
+      );
       return `${cabecera}.${payload}.${firmar(`${cabecera}.${payload}`)}`;
     },
 
@@ -47,4 +63,4 @@ function crearEmisorJwt({ secreto, expiracionSegundos = 3600, ahora = () => Date
   };
 }
 
-module.exports = { crearEmisorJwt };
+module.exports = { crearEmisorJwt, TIPO_RESET_PASSWORD, EXPIRACION_RESET_SEGUNDOS };

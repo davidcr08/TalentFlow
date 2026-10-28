@@ -174,3 +174,21 @@ Los resultados de las pruebas del Reto 1 se documentan en `docs/reto-01/pruebas.
 - Variables: `JWT_SECRET` (≥ 32 caracteres, obligatorio), `JWT_EXPIRA_SEGUNDOS` (default 3600). Ver `.env.example`.
 
 > Si ya tenías el volumen de Postgres creado, `init.sql` no se reejecuta: usa `docker compose down -v` o crea la tabla `cuentas` a mano.
+
+## Restablecer contraseña (RF-04 / RF-05)
+
+`POST /auth/reset-password` (también vía Gateway) recibe `{ "token", "newPassword" }` y responde `200` con `{ "message" }`.
+
+- **Token**: JWT HS256 con `sub`, `type: "RESET_PASSWORD"`, `ver`, `iat`, `exp` (15 min). Lo emite `POST /auth/recover-password`
+  (`emitirReset` en `src/auth/jwt.js`). `ver` es la `token_version` de la cuenta al emitirse; al hacer el reset se incrementa,
+  así que el token (y cualquier otro emitido antes) queda **obsoleto** y no sirve una segunda vez. El cambio es un único `UPDATE`
+  condicional, por lo que dos usos simultáneos del mismo token no pueden ganar los dos.
+- **400** (mensaje único `Token inválido o expirado`) si el token está expirado, alterado, con versión obsoleta, con `type` distinto
+  de `RESET_PASSWORD`, o si la cuenta no existe o está `DESACTIVADA_PERMANENTE`. **400** con detalle por campo si falta `token` o
+  `newPassword`, o si la contraseña incumple la política. En ese caso el token **no se consume**.
+- **Política (RNF-05)**: 8-128 caracteres, con mayúscula, minúscula, dígito y carácter especial (`src/auth/politica-password.js`).
+- **RF-05**: el token de activación inicial y el de recuperación son iguales; decide el estado de la cuenta. `INACTIVA` → `ACTIVA` y
+  se publica `cuenta.activada` (`{ empleadoId, email, motivo: "ACTIVACION_INICIAL" }`). `ACTIVA` y `SUSPENDIDA_TEMPORAL` solo
+  cambian la contraseña: ni cambian de estado ni publican evento. Si el broker falla, el cambio ya guardado no se revierte (RNF-06).
+- **BD**: `cuentas` gana `token_version` y el estado `DESACTIVADA_PERMANENTE`. En volúmenes ya creados `init.sql` no se reejecuta:
+  aplica los `ALTER TABLE` del final de la sección `cuentas` a mano o usa `docker compose down -v`.

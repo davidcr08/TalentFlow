@@ -23,6 +23,15 @@ function crearRouterAuth(servicioAuth) {
   }
   }); 
 
+  // RF-04 / RF-05: restablecer contraseña con un token RESET_PASSWORD
+  router.post("/auth/reset-password", async (req, res, next) => {
+    try {
+      const { token, newPassword } = req.body ?? {};
+      res.status(200).json(await servicioAuth.resetPassword(token, newPassword));
+    } catch (error) {
+      next(error);
+    }
+  });
 
   return router;
 }

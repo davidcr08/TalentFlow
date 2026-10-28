@@ -98,6 +98,39 @@ const openapiSpec = {
         }
       }
     },
+    "/auth/reset-password": {
+      post: {
+        summary: "Restablece la contraseña con un token RESET_PASSWORD",
+        description:
+          "Recibe el token (JWT type RESET_PASSWORD) y la nueva contraseña. Responde 400 si el token está expirado, alterado, ya usado (versión obsoleta) o tiene otro type; si la contraseña incumple la política (RNF-05: 8-128 caracteres con mayúscula, minúscula, dígito y carácter especial); o si la cuenta está DESACTIVADA_PERMANENTE. El mensaje es el mismo para todos los fallos del token y de la cuenta. Si la cuenta está INACTIVA pasa a ACTIVA y se publica cuenta.activada con motivo ACTIVACION_INICIAL; si está ACTIVA o SUSPENDIDA_TEMPORAL solo cambia la contraseña, sin cambio de estado ni evento.",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["token", "newPassword"],
+                properties: {
+                  token: { type: "string" },
+                  newPassword: { type: "string", format: "password" }
+                }
+              }
+            }
+          }
+        },
+        responses: {
+          200: {
+            description: "Contraseña actualizada",
+            content: {
+              "application/json": {
+                schema: { type: "object", properties: { message: { type: "string" } } }
+              }
+            }
+          },
+          400: { description: "Token inválido, contraseña fuera de política, cuenta DESACTIVADA_PERMANENTE o faltan campos", content: { "application/json": { schema: errorSchema } } }
+        }
+      }
+    },
     "/empleados": {
       post: {
         summary: "Registra un nuevo empleado",

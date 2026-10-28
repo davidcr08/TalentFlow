@@ -23,6 +23,7 @@ Documento vivo. La fuente de verdad de nombres, productores, consumidores y carg
 | `empleado.actualizado` | empleados-service  ✅ | perfiles | 4 |
 | `empleado.retirado` | empleados-service  ✅ | perfiles, notificaciones, vacaciones | 4 |
 | `vacaciones.programadas` | **vacaciones-service** ✅ | notificaciones | 4 |
+| `cuenta.activada` | empleados-service ✅ | _(ninguno aún)_ | 5 |
 
 Reacciones: ver README raíz, sección *Reto 4*.
 
@@ -64,3 +65,8 @@ Política de confirmación (igual en los tres servicios):
 | `empleado.retirado` | `empleadoId, email, fechaRetiro` (+ `motivo` si el `DELETE` lo trae en el cuerpo) |
 
 Sin `empleadoId` y `email` los consumidores rechazan el mensaje como inválido.
+
+### `cuenta.activada` (Reto 5, RF-05)
+
+Se publica solo cuando `POST /auth/reset-password` activa una cuenta `INACTIVA`. `data`: `empleadoId, email, motivo`
+(`motivo` = `ACTIVACION_INICIAL`). **Pendiente:** contrastar la carga con el Catálogo de Eventos, que no está en el repositorio.
