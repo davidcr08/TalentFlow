@@ -1,7 +1,12 @@
 const { AppError } = require("../errores");
 const { verificar, hashear } = require("../auth/password");
 const { validarPassword } = require("../auth/politica-password");
-const { TIPO_RESET_PASSWORD, EXPIRACION_RESET_SEGUNDOS } = require("../auth/jwt");
+
+// RF-08
+const {
+  TIPO_RESET_PASSWORD,
+  EXPIRACION_RECUPERACION_SEGUNDOS
+} = require("../auth/jwt");
 
 const ROLES = Object.freeze({ ADMIN: "ADMIN", USER: "USER" });
 const ESTADOS_CUENTA = Object.freeze({
@@ -135,10 +140,13 @@ function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicad
 
   // RF-04: el token es un JWT firmado, type RESET_PASSWORD, con la versión vigente de la cuenta.
   const tokenRecuperacion = emisorJwt.emitirReset({
-    sub: cuenta.identificador,
-    version: cuenta.versionToken ?? 0
-  });
-  const expiraEn = new Date(Date.now() + EXPIRACION_RESET_SEGUNDOS * 1000).toISOString();
+  sub: cuenta.identificador,
+  version: cuenta.versionToken ?? 0,
+  expiracionSegundosReset: EXPIRACION_RECUPERACION_SEGUNDOS
+});
+  const expiraEn = new Date(
+  Date.now() + EXPIRACION_RECUPERACION_SEGUNDOS * 1000
+  ).toISOString();
 
   if (!publicadorEventos) {
     throw new AppError("Servicio de recuperación no disponible", 503);

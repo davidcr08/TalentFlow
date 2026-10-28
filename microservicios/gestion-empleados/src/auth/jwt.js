@@ -8,7 +8,15 @@ const SECRETO_MINIMO = 32;
 // RF-04/RF-05: tipo de los tokens de reset (activación inicial y recuperación). Ambos llevan
 // el mismo type; el servicio los distingue por el estado de la cuenta, no por el token.
 const TIPO_RESET_PASSWORD = "RESET_PASSWORD";
-const EXPIRACION_RESET_SEGUNDOS = 15 * 60;
+
+
+// RF-08
+const EXPIRACION_ACTIVACION_SEGUNDOS =
+  Number(process.env.JWT_ACTIVACION_EXPIRA_SEGUNDOS) || 24 * 60 * 60;
+
+const EXPIRACION_RECUPERACION_SEGUNDOS =
+  Number(process.env.JWT_RECUPERACION_EXPIRA_SEGUNDOS) || 30 * 60;
+
 
 const b64url = (buffer) => Buffer.from(buffer).toString("base64url");
 
@@ -33,14 +41,34 @@ function crearEmisorJwt({ secreto, expiracionSegundos = 3600, ahora = () => Date
 
     // Token de un solo uso lógico: `ver` es la versión de tokens de la cuenta al emitirlo; al
     // hacer el reset la cuenta incrementa su versión y el token queda obsoleto.
-    emitirReset({ sub, version, expiracionSegundosReset = EXPIRACION_RESET_SEGUNDOS }) {
-      const iat = Math.floor(ahora() / 1000);
-      const cabecera = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-      const payload = b64url(
-        JSON.stringify({ sub, type: TIPO_RESET_PASSWORD, ver: version, iat, exp: iat + expiracionSegundosReset })
-      );
-      return `${cabecera}.${payload}.${firmar(`${cabecera}.${payload}`)}`;
-    },
+    emitirReset({
+     sub,
+     version,
+     tipoUso = "RECUPERACION",
+       expiracionSegundosReset
+           }) {
+              const iat = Math.floor(ahora() / 1000);
+              const duracion = expiracionSegundosReset ??
+                               (tipoUso === "ACTIVACION"
+                               ? EXPIRACION_ACTIVACION_SEGUNDOS
+                               : EXPIRACION_RECUPERACION_SEGUNDOS);
+
+                const cabecera = b64url(
+                JSON.stringify({ alg: "HS256", typ: "JWT" })
+                );
+
+         const payload = b64url(
+         JSON.stringify({
+         sub,
+         type: TIPO_RESET_PASSWORD,
+         ver: version,
+         iat,
+         exp: iat + duracion
+         })
+  );
+
+  return `${cabecera}.${payload}.${firmar(`${cabecera}.${payload}`)}`;
+},
 
     // Devuelve el payload si la firma y la vigencia son válidas; null en otro caso.
     verificar(token) {
@@ -63,4 +91,9 @@ function crearEmisorJwt({ secreto, expiracionSegundos = 3600, ahora = () => Date
   };
 }
 
-module.exports = { crearEmisorJwt, TIPO_RESET_PASSWORD, EXPIRACION_RESET_SEGUNDOS };
+module.exports = {
+  crearEmisorJwt,
+  TIPO_RESET_PASSWORD,
+  EXPIRACION_ACTIVACION_SEGUNDOS,
+  EXPIRACION_RECUPERACION_SEGUNDOS
+};
