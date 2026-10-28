@@ -138,6 +138,48 @@ function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicad
   return respuesta;
 }
 
+  // RF: cambio de contraseña con autenticación previa del Gateway.
+async function changePassword(empleadoId, currentPassword, newPassword) {
+  if (
+    typeof empleadoId !== "string" || !empleadoId.trim() ||
+    typeof currentPassword !== "string" || !currentPassword ||
+    typeof newPassword !== "string" || !newPassword
+  ) {
+    throw new AppError("Debe enviar la contraseña actual y la nueva", 400);
+  }
+
+  const cuenta = await repositorioCuentas.buscarPorId(empleadoId);
+
+  if (
+    !cuenta ||
+    cuenta.estado !== ESTADOS_CUENTA.ACTIVA ||
+    !verificar(currentPassword, cuenta.passwordHash)
+  ) {
+    throw new AppError("La contraseña actual es incorrecta", 400);
+  }
+
+  const incumplimientos = validarPassword(newPassword);
+  if (incumplimientos.length > 0) {
+    throw new AppError(
+      "La contraseña no cumple la política de seguridad",
+      400,
+      incumplimientos.map((message) => ({ field: "newPassword", message }))
+    );
+  }
+ //RF - 06
+  const actualizada = await repositorioCuentas.actualizarPasswordConVersion({
+    empleadoId: cuenta.empleadoId,
+    versionEsperada: cuenta.versionToken,
+    passwordHash: hashear(newPassword),
+    nuevoEstado: cuenta.estado
+  });
+
+  if (!actualizada) {
+    throw new AppError("No se pudo actualizar la contraseña; vuelve a intentarlo", 400);
+  }
+
+  return { message: "Contraseña actualizada correctamente" };
+}
   // RF-04 / RF-05: POST /auth/reset-password
   async function resetPassword(token, newPassword) {
     const faltantes = [
@@ -220,7 +262,7 @@ function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicad
     return { message: "Contraseña actualizada correctamente" };
   }
 
-  return { login, recuperarPassword, resetPassword };
+  return { login, recuperarPassword, resetPassword, changePassword };
 }
 
 module.exports = {

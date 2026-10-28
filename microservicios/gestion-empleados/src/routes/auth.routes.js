@@ -33,6 +33,25 @@ function crearRouterAuth(servicioAuth) {
     }
   });
 
+  
+    // RF-06: cambio de contraseña con identidad reenviada por el Gateway
+  router.post("/auth/change-password", async (req, res, next) => {
+    try {
+      const empleadoId = req.headers.sub;
+      const { currentPassword, newPassword } = req.body ?? {};
+
+      res.status(200).json(
+        await servicioAuth.changePassword(
+          empleadoId,
+          currentPassword,
+          newPassword
+        )
+      );
+    } catch (error) {
+      next(error);
+    }
+  });
+
   return router;
 }
 

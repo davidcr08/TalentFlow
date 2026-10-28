@@ -4,6 +4,11 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+
+//rf 06
+const crypto = require("node:crypto");
+const JWT_SECRET = process.env.JWT_SECRET;
+
 // Empleados
 const EMPLEADOS_URL = process.env.EMPLEADOS_SERVICE_URL || 'http://empleados-service:8081';
 //Departamentos
@@ -82,11 +87,27 @@ app.use(
 );
 
 // Auth (RF-01): POST /auth/login lo atiende empleados-service.
+// RF-06: proteger únicamente el cambio de contraseña.
+app.use(
+    "/auth/change-password",
+    (req, res, next) => {
+        if (req.method !== "POST") {
+            return res.status(404).json({
+                error: "Not Found",
+                message: "Ruta no encontrada"
+            });
+        }
+        next();
+    },
+    verificarTokenAcceso
+);
+
+// El resto de las rutas de autenticación conserva su comportamiento.
 app.use(
     createProxyMiddleware({
         target: EMPLEADOS_URL,
         changeOrigin: true,
-        pathFilter: ['/auth'],
+        pathFilter: ["/auth"],
         on: { error: handleProxyError }
     })
 );
@@ -143,3 +164,74 @@ app.listen(PORT, () => {
 });
 
 
+function verificarTokenAcceso(req, res, next) {
+    const autorizacion = req.headers.authorization;
+
+    if (!JWT_SECRET || JWT_SECRET.length < 32) {
+        return res.status(500).json({
+            error: "Error de configuración de autenticación"
+        });
+    }
+
+    if (!autorizacion || !autorizacion.startsWith("Bearer ")) {
+        return res.status(401).json({
+            error: "Token de autenticación requerido"
+        });
+    }
+
+    const partes = autorizacion.slice(7).split(".");
+    if (partes.length !== 3) {
+        return res.status(401).json({ error: "Token inválido o expirado" });
+    }
+
+    const [cabecera, payload, firma] = partes;
+
+    try {
+        const datosCabecera = JSON.parse(
+            Buffer.from(cabecera, "base64url").toString("utf8")
+        );
+
+        if (datosCabecera.alg !== "HS256" || datosCabecera.typ !== "JWT") {
+            return res.status(401).json({ error: "Token inválido o expirado" });
+        }
+
+        const firmaEsperada = crypto
+            .createHmac("sha256", JWT_SECRET)
+            .update(`${cabecera}.${payload}`)
+            .digest();
+
+        const firmaRecibida = Buffer.from(firma, "base64url");
+
+        if (
+            firmaEsperada.length !== firmaRecibida.length ||
+            !crypto.timingSafeEqual(firmaEsperada, firmaRecibida)
+        ) {
+            return res.status(401).json({ error: "Token inválido o expirado" });
+        }
+
+        const datos = JSON.parse(
+            Buffer.from(payload, "base64url").toString("utf8")
+        );
+
+        const ahora = Math.floor(Date.now() / 1000);
+
+        if (
+            typeof datos.sub !== "string" ||
+            !datos.sub.trim() ||
+            !Number.isFinite(datos.exp) ||
+            datos.exp <= ahora ||
+            !Number.isFinite(datos.iat) ||
+            datos.iat > ahora
+        ) {
+            return res.status(401).json({ error: "Token inválido o expirado" });
+        }
+
+        // Nunca confiar en un sub enviado por el cliente.
+        delete req.headers.sub;
+        req.headers.sub = datos.sub;
+
+        next();
+    } catch {
+        return res.status(401).json({ error: "Token inválido o expirado" });
+    }
+}
