@@ -62,6 +62,21 @@ function crearOperaciones(ejecutor) {
       return aCuenta(resultado.rows[0]);
     },
 
+    //RF-38
+    async incrementarVersionToken(empleadoId) {
+    const resultado = await ejecutor.query(
+    `UPDATE cuentas
+        SET token_version = token_version + 1
+      WHERE empleado_id = $1
+      RETURNING token_version`,
+    [empleadoId]
+  );
+
+  return resultado.rowCount === 1
+    ? resultado.rows[0].token_version
+    : null;
+  },
+
     // Compare-and-set atómico en un solo UPDATE: cambia la contraseña y el estado e incrementa
     // token_version solo si la versión sigue siendo la esperada. Dos usos concurrentes del mismo
     // token no pueden ganar los dos: el segundo no encuentra fila y devuelve false.

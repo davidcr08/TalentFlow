@@ -35,6 +35,22 @@ function crearRepositorioCuentasEnMemoria() {
       }
       return null;
     },
+  
+    
+  //RF-38  
+  async incrementarVersionToken(empleadoId) {
+  for (const cuenta of cuentas.values()) {
+    if (cuenta.empleadoId !== empleadoId) continue;
+
+    cuenta.versionToken += 1;
+    return cuenta.versionToken;
+  }
+
+  return null;
+  },
+
+
+
     // Compare-and-set: solo actualiza si la versión de tokens sigue siendo la esperada (el token
     // no se ha usado ya) y la cuenta no está DESACTIVADA_PERMANENTE. Devuelve true si actualizó.
     async actualizarPasswordConVersion({ empleadoId, versionEsperada, passwordHash, nuevoEstado }) {

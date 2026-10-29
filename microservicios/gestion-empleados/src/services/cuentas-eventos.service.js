@@ -79,7 +79,8 @@ function crearManejadorEventosCuentas({
   }
 
   // RF-09
-  async function crearCuentaDesdeEmpleado(tx, evento) {
+  async function crearCuentaDesdeEmpleado(tx, evento) 
+  {
     const empleadoId = texto(evento.data, "empleadoId");
     const email = texto(evento.data, "email");
 
@@ -114,12 +115,20 @@ function crearManejadorEventosCuentas({
       throw new EventoInvalido(`el empleado ${empleadoId} no existe; no se puede crear su cuenta`);
     }
 
-    const creada = await tx.buscarPorId(empleadoId);
-    const tokenActivacion = emisorJwt.emitirReset({
-      sub: empleadoId,
-      version: creada.versionToken,
-      tipoUso: "ACTIVACION"
-    });
+    //rf-38
+    const versionToken = await tx.incrementarVersionToken(empleadoId);
+
+  if (versionToken === null) {
+    throw new Error(
+      `No se pudo incrementar la versión del token para ${empleadoId}`
+    );
+}
+
+  const tokenActivacion = emisorJwt.emitirReset({
+  sub: empleadoId,
+  version: Number(versionToken),
+  tipoUso: "ACTIVACION"
+  });
     const { exp } = emisorJwt.verificar(tokenActivacion);
 
     await publicadorEventos.publicar("usuario.creado", {

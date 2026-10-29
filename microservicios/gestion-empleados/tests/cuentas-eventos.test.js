@@ -93,7 +93,7 @@ describe("Consumo de eventos de cuentas (RF-09 / RF-10 / RF-11)", () => {
       const payload = emisor.verificar(tokenActivacion);
       assert.equal(payload.type, "RESET_PASSWORD");
       assert.equal(payload.sub, "E001");
-      assert.equal(payload.ver, 0);
+      assert.equal(payload.ver, 1);
       assert.equal(payload.exp - payload.iat, EXPIRACION_ACTIVACION_SEGUNDOS);
       assert.equal(expiraEn, new Date(payload.exp * 1000).toISOString().replace(".000Z", "Z"));
     });

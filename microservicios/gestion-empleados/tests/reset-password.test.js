@@ -255,6 +255,49 @@ describe("POST /auth/reset-password (RF-04 / RF-05)", () => {
       assert.equal((await reset({ token, newPassword: CLAVE_NUEVA })).status, 200);
       assert.equal((await reset({ token, newPassword: "OtraClave#9999" })).status, 400);
     });
+ 
+    
+    it("RF-38: emitir un token nuevo invalida el token de recuperación anterior", async () => {
+      const solicitarRecuperacion = () =>
+        fetch(`${baseUrl}/auth/recover-password`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: "activa@empresa.com" })
+        });
+
+      // Primera emisión.
+      await solicitarRecuperacion();
+      const primerEvento = eventos.filter(
+        (e) => e.tipo === "usuario.recuperacion"
+      )[0];
+      assert.ok(primerEvento);
+
+      // Segunda emisión para la misma cuenta.
+      await solicitarRecuperacion();
+      const eventosRecuperacion = eventos.filter(
+        (e) => e.tipo === "usuario.recuperacion"
+      );
+      assert.equal(eventosRecuperacion.length, 2);
+
+      const tokenAnterior = primerEvento.data.tokenRecuperacion;
+      const tokenNuevo = eventosRecuperacion[1].data.tokenRecuperacion;
+
+      // El token anterior debe rechazarse.
+      const respuestaAnterior = await reset({
+        token: tokenAnterior,
+        newPassword: CLAVE_NUEVA
+      });
+      assert.equal(respuestaAnterior.status, 400);
+
+      // El token nuevo debe seguir siendo válido.
+      const respuestaNuevo = await reset({
+        token: tokenNuevo,
+        newPassword: CLAVE_NUEVA
+      });
+      assert.equal(respuestaNuevo.status, 200);
+    });
+
+
   });
 
 
@@ -280,7 +323,7 @@ describe("POST /auth/reset-password (RF-04 / RF-05)", () => {
   );
   assert.equal(payload.sub, "E002");
   assert.equal(payload.type, "RESET_PASSWORD");
-  assert.equal(payload.ver, 0);
+  assert.equal(payload.ver, 1);
   assert.equal(payload.exp - payload.iat, 30 * 60);
   assert.equal(
     Date.parse(publicado.data.expiraEn) / 1000,
@@ -305,7 +348,7 @@ it("RF-08: activación inicial genera JWT con expiración de 24 horas", async ()
 
   assert.equal(payload.sub, "E001");
   assert.equal(payload.type, "RESET_PASSWORD");
-  assert.equal(payload.ver, 0);
+  assert.equal(payload.ver, 1);
   assert.equal(payload.exp - payload.iat, 24 * 60 * 60);
   assert.equal(
     Date.parse(publicado.data.expiraEn) / 1000,

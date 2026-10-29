@@ -109,79 +109,93 @@ function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicad
   }
 
   // reto 5 rf03
-  async function recuperarPassword(email) 
-{
-  if (typeof email !== "string" || !email.trim()) {
-    throw new AppError("Debe enviar un email válido", 400, [
-      { field: "email", message: "Es un campo obligatorio" }
-    ]);
-  }
 
-  const emailNormalizado = email.trim();
-  const cuenta = await buscarCuenta(emailNormalizado);
+  // RF-03 / RF-38
+  async function recuperarPassword(email) {
+    if (typeof email !== "string" || !email.trim()) {
+      throw new AppError("Debe enviar un email válido", 400, [
+        { field: "email", message: "Es un campo obligatorio" }
+      ]);
+    }
 
-  // La respuesta no revela si la cuenta existe ni su estado.
-  const respuesta = {
-    message: "Si la cuenta puede recuperar su contraseña, recibirá instrucciones."
-  };
+    const emailNormalizado = email.trim();
 
-  const estadosPermitidos = [
-    ESTADOS_CUENTA.ACTIVA,
-    ESTADOS_CUENTA.INACTIVA,
-    ESTADOS_CUENTA.SUSPENDIDA_TEMPORAL
-  ];
+    const respuesta = {
+      message: "Si la cuenta puede recuperar su contraseña, recibirá instrucciones."
+    };
 
-  // No recuperar cuentas inexistentes, desactivadas permanentemente
-  // ni el ADMIN semilla, que no tiene una cuenta recuperable en la BD.
-  if (
-    !cuenta ||
-    (admin && admin.email.toLowerCase() === emailNormalizado.toLowerCase()) ||
-    !estadosPermitidos.includes(cuenta.estado)
-  ) {
-    return respuesta;
-  }
+    const estadosPermitidos = [
+      ESTADOS_CUENTA.ACTIVA,
+      ESTADOS_CUENTA.INACTIVA,
+      ESTADOS_CUENTA.SUSPENDIDA_TEMPORAL
+    ];
+
+    const cuenta = await buscarCuenta(emailNormalizado);
+
+    if (
+      !cuenta ||
+      (admin && admin.email.toLowerCase() === emailNormalizado.toLowerCase()) ||
+      !estadosPermitidos.includes(cuenta.estado)
+    ) {
+      return respuesta;
+    }
+
+    if (!publicadorEventos) {
+      throw new AppError("Servicio de recuperación no disponible", 503);
+    }
 
     const esActivacion = cuenta.estado === ESTADOS_CUENTA.INACTIVA;
     const tipoUso = esActivacion ? "ACTIVACION" : "RECUPERACION";
- 
-   const expiracionSegundos = esActivacion
-  ? EXPIRACION_ACTIVACION_SEGUNDOS
-  : EXPIRACION_RECUPERACION_SEGUNDOS;
 
-   const tokenRecuperacion = emisorJwt.emitirReset({
-   sub: cuenta.identificador,
-   version: cuenta.versionToken ?? 0,
-   tipoUso,
-   expiracionSegundosReset: expiracionSegundos
-    });
+    const expiracionSegundos = esActivacion
+      ? EXPIRACION_ACTIVACION_SEGUNDOS
+      : EXPIRACION_RECUPERACION_SEGUNDOS;
 
-   const payloadToken = emisorJwt.verificar(tokenRecuperacion);
+    try {
+      await repositorioCuentas.transaccion(async (tx) => {
+        // Incrementa la versión y obtiene el valor vigente para el nuevo token.
+        const versionToken = await tx.incrementarVersionToken(
+          cuenta.identificador
+        );
 
-    if (!payloadToken) {
-     throw new Error("No se pudo verificar el token de recuperación generado");
-                        }
+        if (versionToken === null) {
+          throw new Error("No se encontró la cuenta para incrementar su versión");
+        }
 
-const expiraEn = new Date(
-  payloadToken.exp * 1000
-).toISOString();
+        const tokenRecuperacion = emisorJwt.emitirReset({
+          sub: cuenta.identificador,
+          version: Number(versionToken),
+          tipoUso,
+          expiracionSegundosReset: expiracionSegundos
+        });
 
-  if (!publicadorEventos) {
-    throw new AppError("Servicio de recuperación no disponible", 503);
+        const payloadToken = emisorJwt.verificar(tokenRecuperacion);
+
+        if (!payloadToken) {
+          throw new Error("No se pudo verificar el token generado");
+        }
+
+        const expiraEn = new Date(
+          payloadToken.exp * 1000
+        ).toISOString();
+
+        await publicadorEventos.publicar("usuario.recuperacion", {
+          email: emailNormalizado,
+          tokenRecuperacion,
+          expiraEn
+        });
+      });
+    } catch (error) {
+      console.error(
+        "No se pudo procesar la recuperación de contraseña:",
+        error.message
+      );
+      throw new AppError("Servicio de recuperación no disponible", 503);
+    }
+
+    return respuesta;
   }
 
-  try {
-    await publicadorEventos.publicar("usuario.recuperacion", {
-      email: emailNormalizado,
-      tokenRecuperacion,
-      expiraEn
-    });
-  } catch (error) {
-    console.error("No se pudo publicar el evento de recuperación:", error.message);
-    throw new AppError("Servicio de recuperación no disponible", 503);
-  }
-
-  return respuesta;
-}
 
   // RF: cambio de contraseña con autenticación previa del Gateway.
 async function changePassword(empleadoId, currentPassword, newPassword) {
