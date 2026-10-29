@@ -256,4 +256,60 @@ describe("POST /auth/reset-password (RF-04 / RF-05)", () => {
       assert.equal((await reset({ token, newPassword: "OtraClave#9999" })).status, 400);
     });
   });
+
+
+
+  it("RF-08: recuperación genera JWT con claims correctos y expiración de 30 minutos", async () => {
+  await fetch(`${baseUrl}/auth/recover-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "activa@empresa.com" })
+  });
+
+  const publicado = eventos.find((e) => e.tipo === "usuario.recuperacion");
+  assert.ok(publicado);
+
+  const token = publicado.data.tokenRecuperacion;
+  const payload = JSON.parse(
+    Buffer.from(token.split(".")[1], "base64url").toString("utf8")
+  );
+
+  assert.deepEqual(
+    Object.keys(payload).sort(),
+    ["exp", "iat", "sub", "type", "ver"].sort()
+  );
+  assert.equal(payload.sub, "E002");
+  assert.equal(payload.type, "RESET_PASSWORD");
+  assert.equal(payload.ver, 0);
+  assert.equal(payload.exp - payload.iat, 30 * 60);
+  assert.equal(
+    Date.parse(publicado.data.expiraEn) / 1000,
+    payload.exp
+  );
+});
+
+it("RF-08: activación inicial genera JWT con expiración de 24 horas", async () => {
+  await fetch(`${baseUrl}/auth/recover-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "inactiva@empresa.com" })
+  });
+
+  const publicado = eventos.find((e) => e.tipo === "usuario.recuperacion");
+  assert.ok(publicado);
+
+  const token = publicado.data.tokenRecuperacion;
+  const payload = JSON.parse(
+    Buffer.from(token.split(".")[1], "base64url").toString("utf8")
+  );
+
+  assert.equal(payload.sub, "E001");
+  assert.equal(payload.type, "RESET_PASSWORD");
+  assert.equal(payload.ver, 0);
+  assert.equal(payload.exp - payload.iat, 24 * 60 * 60);
+  assert.equal(
+    Date.parse(publicado.data.expiraEn) / 1000,
+    payload.exp
+  );
+});
 });

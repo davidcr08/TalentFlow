@@ -5,8 +5,10 @@ const { validarPassword } = require("../auth/politica-password");
 // RF-08
 const {
   TIPO_RESET_PASSWORD,
+  EXPIRACION_ACTIVACION_SEGUNDOS,
   EXPIRACION_RECUPERACION_SEGUNDOS
 } = require("../auth/jwt");
+
 
 const ROLES = Object.freeze({ ADMIN: "ADMIN", USER: "USER" });
 const ESTADOS_CUENTA = Object.freeze({
@@ -107,7 +109,8 @@ function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicad
   }
 
   // reto 5 rf03
-  async function recuperarPassword(email) {
+  async function recuperarPassword(email) 
+{
   if (typeof email !== "string" || !email.trim()) {
     throw new AppError("Debe enviar un email válido", 400, [
       { field: "email", message: "Es un campo obligatorio" }
@@ -138,15 +141,29 @@ function crearServicioAuth(repositorioCuentas, emisorJwt, admin = null, publicad
     return respuesta;
   }
 
-  // RF-04: el token es un JWT firmado, type RESET_PASSWORD, con la versión vigente de la cuenta.
-  const tokenRecuperacion = emisorJwt.emitirReset({
-  sub: cuenta.identificador,
-  version: cuenta.versionToken ?? 0,
-  expiracionSegundosReset: EXPIRACION_RECUPERACION_SEGUNDOS
-});
-  const expiraEn = new Date(
-  Date.now() + EXPIRACION_RECUPERACION_SEGUNDOS * 1000
-  ).toISOString();
+    const esActivacion = cuenta.estado === ESTADOS_CUENTA.INACTIVA;
+    const tipoUso = esActivacion ? "ACTIVACION" : "RECUPERACION";
+ 
+   const expiracionSegundos = esActivacion
+  ? EXPIRACION_ACTIVACION_SEGUNDOS
+  : EXPIRACION_RECUPERACION_SEGUNDOS;
+
+   const tokenRecuperacion = emisorJwt.emitirReset({
+   sub: cuenta.identificador,
+   version: cuenta.versionToken ?? 0,
+   tipoUso,
+   expiracionSegundosReset: expiracionSegundos
+    });
+
+   const payloadToken = emisorJwt.verificar(tokenRecuperacion);
+
+    if (!payloadToken) {
+     throw new Error("No se pudo verificar el token de recuperación generado");
+                        }
+
+const expiraEn = new Date(
+  payloadToken.exp * 1000
+).toISOString();
 
   if (!publicadorEventos) {
     throw new AppError("Servicio de recuperación no disponible", 503);
