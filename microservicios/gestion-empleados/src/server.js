@@ -7,6 +7,8 @@ const { crearPublicadorEventos } = require("./events/publicador-eventos");
 const { crearEmisorJwt } = require("./auth/jwt");
 const { hashear } = require("./auth/password");
 const { crearServicioAuth } = require("./services/auth.service");
+const { crearManejadorEventosCuentas } = require("./services/cuentas-eventos.service");
+const { crearConsumidorEventos } = require("./events/consumidor-eventos");
 //rf-07
 const {
   crearRepositorioCuentasPostgres,
@@ -115,6 +117,16 @@ async function iniciarServidor() {
       console.log(`Servicio de empleados escuchando en http://localhost:${PUERTO}`);
       console.log(`Documentación Swagger en http://localhost:${PUERTO}/docs`);
     });
+
+    // RF-09/RF-10/RF-11: consume empleado.creado y vacaciones.iniciadas/finalizadas. Va al final,
+    // con la BD y el administrador semilla ya listos; si el broker no está, reintenta solo.
+    crearConsumidorEventos({
+      manejador: crearManejadorEventosCuentas({
+        repositorioCuentas,
+        emisorJwt,
+        publicadorEventos
+      }).manejar
+    }).iniciar();
   } catch (error) {
     console.error("Error al iniciar el servicio de empleados:", error);
     await pool.end();

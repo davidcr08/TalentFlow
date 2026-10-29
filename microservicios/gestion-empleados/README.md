@@ -192,3 +192,32 @@ Los resultados de las pruebas del Reto 1 se documentan en `docs/reto-01/pruebas.
   cambian la contraseña: ni cambian de estado ni publican evento. Si el broker falla, el cambio ya guardado no se revierte (RNF-06).
 - **BD**: `cuentas` gana `token_version` y el estado `DESACTIVADA_PERMANENTE`. En volúmenes ya creados `init.sql` no se reejecuta:
   aplica los `ALTER TABLE` del final de la sección `cuentas` a mano o usa `docker compose down -v`.
+
+## Eventos de cuentas (RF-09 / RF-10 / RF-11)
+
+Además de la API, el servicio consume eventos del broker (cola `empleados-service.q`, ver `docs/eventos.md`):
+
+- **RF-09 `empleado.creado`** → cuenta `INACTIVA`, rol `USER`, con un hash scrypt de 256 bits aleatorios que no se guarda (nadie puede
+  iniciar sesión con ella), y publica `usuario.creado` con `tokenActivacion` (JWT `RESET_PASSWORD`, `ver` = `token_version` de la cuenta)
+  y `expiraEn`. Ese token activa la cuenta en `POST /auth/reset-password` (RF-05). Si ya hay cuenta con ese `empleadoId` o `email`,
+  se ignora con log.
+- **RF-10 `vacaciones.iniciadas`** → solo si la cuenta está `ACTIVA` pasa a `SUSPENDIDA_TEMPORAL` y publica `cuenta.desactivada`
+  (`motivo: "VACACIONES"`, `permanente: false`).
+- **RF-11 `vacaciones.finalizadas`** → solo si la cuenta está `SUSPENDIDA_TEMPORAL` pasa a `ACTIVA` y publica `cuenta.activada`
+  (`motivo: "FIN_VACACIONES"`).
+
+Cómo está hecho (`src/services/cuentas-eventos.service.js`, `src/events/consumidor-eventos.js`):
+
+- **Deduplicación**: tabla `eventos_procesados`; el id, el cambio de cuenta y la publicación del evento de salida van en la misma
+  transacción (si el broker rechaza la publicación, todo se deshace y el mensaje se reintenta).
+- **Estado**: las transiciones son `UPDATE ... WHERE estado = <esperado>` (compare-and-set), así que eventos repetidos o concurrentes
+  no pueden pisarse. Un mensaje a la vez (`prefetch 1`).
+- **Ack**: procesado / duplicado / ignorado → `ack`; mensaje inválido → `reject` sin reencolar; fallo transitorio → pausa de 2 s y
+  `nack` con reencolado. Si la conexión con RabbitMQ cae, el consumidor se reabre solo cada 5 s.
+- **Logs** estructurados (JSON) de cada evento ignorado, con `type`, `id`, `empleadoId` y el motivo.
+
+Pruebas: `npm test` corre las unitarias (repositorio en memoria). Con `TEST_DB_URL` (PostgreSQL desechable) se activan las del SQL real
+y con además `TEST_BROKER_URL` (RabbitMQ) las de extremo a extremo; **vacían** `empleados`, `cuentas` y `eventos_procesados`.
+
+> En volúmenes de Postgres ya creados, `init.sql` no se reejecuta: aplica a mano el `CREATE TABLE IF NOT EXISTS eventos_procesados`
+> (el resto de cambios de `cuentas` ya venía de RF-04) o usa `docker compose down -v`.

@@ -12,11 +12,13 @@ function aCuenta(fila) {
   };
 }
 
-function crearRepositorioCuentasPostgres(pool) {
+// Las operaciones reciben un "ejecutor" con .query: el pool (cada consulta en su conexión) o un
+// cliente dentro de una transacción (ver transaccion() abajo). Así la misma lógica sirve para ambos.
+function crearOperaciones(ejecutor) {
   return {
     // Une la cuenta con el empleado por email (el email vive en `empleados`).
     async buscarPorEmail(email) {
-      const resultado = await pool.query(
+      const resultado = await ejecutor.query(
         `SELECT ${COLUMNAS}
            FROM cuentas c
            JOIN empleados e ON e.id = c.empleado_id
@@ -28,7 +30,7 @@ function crearRepositorioCuentasPostgres(pool) {
 
     //rf-07
       async buscarAdminSemillaPorEmail(email) {
-      const resultado = await pool.query(
+      const resultado = await ejecutor.query(
         `SELECT id, email, password_hash, role, estado
            FROM admin_semilla
           WHERE lower(email) = lower($1)`,
@@ -50,7 +52,7 @@ function crearRepositorioCuentasPostgres(pool) {
  },
 
     async buscarPorId(empleadoId) {
-      const resultado = await pool.query(
+      const resultado = await ejecutor.query(
         `SELECT ${COLUMNAS}
            FROM cuentas c
            JOIN empleados e ON e.id = c.empleado_id
@@ -64,7 +66,7 @@ function crearRepositorioCuentasPostgres(pool) {
     // token_version solo si la versión sigue siendo la esperada. Dos usos concurrentes del mismo
     // token no pueden ganar los dos: el segundo no encuentra fila y devuelve false.
     async actualizarPasswordConVersion({ empleadoId, versionEsperada, passwordHash, nuevoEstado }) {
-      const resultado = await pool.query(
+      const resultado = await ejecutor.query(
         `UPDATE cuentas
             SET password_hash = $3,
                 estado        = $4,
@@ -75,6 +77,65 @@ function crearRepositorioCuentasPostgres(pool) {
         [empleadoId, versionEsperada, passwordHash, nuevoEstado]
       );
       return resultado.rowCount === 1;
+    },
+
+    // RF-09/10/11: registra el id del evento. true = primera vez; false = duplicado.
+    async registrarEvento(id) {
+      const resultado = await ejecutor.query(
+        `INSERT INTO eventos_procesados (id) VALUES ($1) ON CONFLICT (id) DO NOTHING`,
+        [id]
+      );
+      return resultado.rowCount === 1;
+    },
+
+    // RF-09: crea la cuenta INACTIVA, rol USER. El email vive en `empleados` (la cuenta se une a
+    // él por empleado_id), por eso aquí solo hace falta el empleadoId.
+    // Devuelve "CREADA", "YA_EXISTE" (PK repetida) o "EMPLEADO_INEXISTENTE" (viola la FK).
+    async crearCuentaInactiva({ empleadoId, passwordHash }) {
+      try {
+        const resultado = await ejecutor.query(
+          `INSERT INTO cuentas (empleado_id, password_hash, role, estado, token_version)
+           VALUES ($1, $2, 'USER', 'INACTIVA', 0)
+           ON CONFLICT (empleado_id) DO NOTHING`,
+          [empleadoId, passwordHash]
+        );
+        return resultado.rowCount === 1 ? "CREADA" : "YA_EXISTE";
+      } catch (error) {
+        if (error.code === "23503") return "EMPLEADO_INEXISTENTE";
+        throw error;
+      }
+    },
+
+    // RF-10/11: compare-and-set del estado. Solo cambia si la cuenta sigue en `estadoEsperado`;
+    // así un evento concurrente o repetido no puede pisar otra transición.
+    async cambiarEstado({ empleadoId, estadoEsperado, nuevoEstado }) {
+      const resultado = await ejecutor.query(
+        `UPDATE cuentas SET estado = $3 WHERE empleado_id = $1 AND estado = $2`,
+        [empleadoId, estadoEsperado, nuevoEstado]
+      );
+      return resultado.rowCount === 1;
+    }
+  };
+}
+
+function crearRepositorioCuentasPostgres(pool) {
+  return {
+    ...crearOperaciones(pool),
+
+    // Ejecuta `fn(operaciones)` en una transacción: COMMIT si termina, ROLLBACK si lanza.
+    async transaccion(fn) {
+      const cliente = await pool.connect();
+      try {
+        await cliente.query("BEGIN");
+        const resultado = await fn(crearOperaciones(cliente));
+        await cliente.query("COMMIT");
+        return resultado;
+      } catch (error) {
+        await cliente.query("ROLLBACK").catch(() => {});
+        throw error;
+      } finally {
+        cliente.release();
+      }
     }
   };
 }

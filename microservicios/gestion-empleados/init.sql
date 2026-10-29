@@ -70,3 +70,11 @@ CREATE TABLE IF NOT EXISTS admin_semilla (
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
     actualizado_en TIMESTAMP NOT NULL DEFAULT now()
 );
+
+-- RF-09/RF-10/RF-11: deduplicación de eventos consumidos (Catálogo de Eventos, sección 2.1).
+-- El INSERT del id y el efecto del evento van en la MISMA transacción: si el efecto falla, el id
+-- también se deshace y la reentrega del broker reintenta; un id repetido no inserta y se descarta.
+CREATE TABLE IF NOT EXISTS eventos_procesados (
+    id            VARCHAR(64)  PRIMARY KEY,
+    procesado_en  TIMESTAMPTZ  NOT NULL DEFAULT now()
+);

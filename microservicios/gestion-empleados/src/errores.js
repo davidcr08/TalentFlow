@@ -7,4 +7,13 @@ class AppError extends Error {
   }
 }
 
-module.exports = { AppError };
+// Mensaje de broker malformado (JSON roto, faltan campos): reintentarlo no lo arregla, así que el
+// consumidor lo rechaza sin reencolar. No consume el id de deduplicación.
+class EventoInvalido extends Error {
+  constructor(mensaje) {
+    super(mensaje);
+    this.name = "EventoInvalido";
+  }
+}
+
+module.exports = { AppError, EventoInvalido };

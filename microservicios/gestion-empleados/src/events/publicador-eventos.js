@@ -120,7 +120,17 @@ function crearPublicadorEventos({
     return evento;
   }
 
-  return { publicar };
+  // Cierra canal y conexión (apagado ordenado y pruebas). Una publicación posterior reconecta.
+  async function cerrar() {
+    const canalActual = canal;
+    const conexionActual = conexion;
+    canal = undefined;
+    conexion = undefined;
+    await canalActual?.close().catch(() => {});
+    await conexionActual?.close().catch(() => {});
+  }
+
+  return { publicar, cerrar };
 }
 
 module.exports = { crearPublicadorEventos };
