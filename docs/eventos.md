@@ -19,13 +19,14 @@ Documento vivo. La fuente de verdad de nombres, productores, consumidores y carg
 
 | Evento | Productor | Consumidores (cola) | Reto |
 |---|---|---|---|
-| `empleado.creado` | empleados-service  ✅ | perfiles (`perfiles-service.q`), notificaciones (`notificaciones-service.q`), vacaciones (`vacaciones-service.q`), **empleados** (`empleados-service.q`, RF-09) | 4 / 5 |
+| `empleado.creado` | empleados-service  ✅ | perfiles (`perfiles-service.q`), notificaciones (`notificaciones-service.q`, **solo traza**, RF-18), vacaciones (`vacaciones-service.q`), **empleados** (`empleados-service.q`, RF-09) | 4 / 5 |
 | `empleado.actualizado` | empleados-service  ✅ | perfiles | 4 |
-| `empleado.retirado` | empleados-service  ✅ | perfiles, notificaciones, vacaciones, **empleados** (`empleados-service.q`, RF-12) | 4 / 5 |
+| `empleado.retirado` | empleados-service  ✅ | perfiles, notificaciones (**solo traza**, RF-18), vacaciones, **empleados** (`empleados-service.q`, RF-12) | 4 / 5 |
 | `vacaciones.programadas` | **vacaciones-service** ✅ | notificaciones | 4 |
-| `usuario.creado` | empleados-service ✅ | _(ninguno aún)_ | 5 |
-| `cuenta.activada` | empleados-service ✅ | _(ninguno aún)_ | 5 |
-| `cuenta.desactivada` | empleados-service ✅ | _(ninguno aún)_ | 5 |
+| `usuario.creado` | empleados-service ✅ | notificaciones (`notificaciones-service.q`, RF-16 y RF-18) | 5 |
+| `cuenta.activada` | empleados-service ✅ | notificaciones (RF-17) | 5 |
+| `usuario.recuperacion` | empleados-service ✅ | notificaciones (RF-16) | 5 |
+| `cuenta.desactivada` | empleados-service ✅ | notificaciones (RF-17) | 5 |
 | `vacaciones.iniciadas` | **vacaciones-service** ⚠️ _aún no lo publica_ | empleados (`empleados-service.q`) | 5 |
 | `vacaciones.finalizadas` | **vacaciones-service** ⚠️ _aún no lo publica_ | empleados (`empleados-service.q`) | 5 |
 
@@ -101,3 +102,23 @@ Sin `empleadoId` y `email` los consumidores rechazan el mensaje como inválido.
   (al menos una vez; los consumidores deduplican por `id`).
 - **Pendiente (fuera de este alcance)**: `vacaciones-service` todavía no publica `vacaciones.iniciadas` ni `vacaciones.finalizadas`
   (el scheduler del Reto 5), y `notificaciones-service` aún no consume `usuario.creado` (la bienvenida sigue colgada de `empleado.creado`).
+
+### Notificaciones (Reto 5, RF-16 a RF-18)
+
+`notificaciones-service` (`notificaciones-service.q`) consume, además de `vacaciones.programadas`:
+
+| Consume | Notificación (log `[NOTIFICACIÓN] Tipo: … \| Para: … \| Mensaje: …`) |
+|---|---|
+| `usuario.creado` | **`BIENVENIDA`** (RF-18) y **`SEGURIDAD`** (RF-16) con el enlace y el token de activación (`tokenActivacion`). |
+| `usuario.recuperacion` | **`SEGURIDAD`** con el enlace y el token de recuperación (`tokenRecuperacion`). El evento no trae `empleadoId`, así que la notificación se guarda sin él. |
+| `cuenta.activada` | **`CUENTA`**: `ACTIVACION_INICIAL` → cuenta activada, ya puede iniciar sesión; `FIN_VACACIONES` → cuenta reactivada. |
+| `cuenta.desactivada` | **`CUENTA`**: `VACACIONES` → suspensión temporal; `RETIRO` → **correo de despedida** (cuenta desactivada de forma permanente). Un motivo desconocido usa un mensaje genérico según `permanente`. |
+| `empleado.creado`, `empleado.retirado` | Solo una traza en el log (`[TRAZA] …`; catálogo 3.1 y 3.3). **Ya no** envían bienvenida ni desvinculación (quedaron del Reto 4). |
+
+- El enlace es `ENLACE_RESET_PASSWORD` + `?token=<token>` (por defecto `http://localhost:8080/auth/reset-password`).
+- **El token solo se escribe en el log del envío; no se guarda.** El mensaje guardado (el que devuelve `GET /notificaciones`) dice únicamente que se
+  envió un enlace, porque cualquiera con acceso a esa API podría usar el token para apropiarse de la cuenta.
+- Un evento puede producir varias notificaciones (`usuario.creado`: dos); el id del evento se registra una vez, todas se guardan en la misma
+  transacción y la unicidad en BD es `(evento_id, tipo)`.
+- `DESVINCULACION` ya no se genera; se conserva en el `CHECK` y en el enum solo para leer las filas del Reto 4.
+- En volúmenes ya creados `init.sql` no se reejecuta: aplique a mano el bloque `ALTER TABLE notificaciones …` o use `docker compose down -v`.

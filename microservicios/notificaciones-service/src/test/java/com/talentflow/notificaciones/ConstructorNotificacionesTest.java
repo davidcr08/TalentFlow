@@ -11,10 +11,12 @@ import com.talentflow.notificaciones.eventos.EventoInvalidoException;
 import com.talentflow.notificaciones.eventos.EventoParser;
 import com.talentflow.notificaciones.servicio.ConstructorNotificaciones;
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ConstructorNotificacionesTest {
+
+    private static final String TOKEN = "aaa.bbb.ccc";
 
     private final EventoParser parser = new EventoParser(new ObjectMapper());
     private final ConstructorNotificaciones constructor = new ConstructorNotificaciones();
@@ -25,35 +27,177 @@ class ConstructorNotificacionesTest {
         return parser.parsear(json.getBytes(StandardCharsets.UTF_8));
     }
 
-    @Test
-    void empleadoCreadoGeneraBienvenida() {
-        NotificacionNueva n = constructor.construir(evento("empleado.creado",
-                "{\"empleadoId\":\"E001\",\"nombre\":\"Juan\",\"apellido\":\"Pérez\",\"email\":\"juan@empresa.com\"}"))
-                .orElseThrow();
+    private static String usuarioCreado() {
+        return "{\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\","
+                + "\"tokenActivacion\":\"" + TOKEN + "\",\"expiraEn\":\"2026-10-11T12:00:00Z\"}";
+    }
 
-        assertThat(n.tipo()).isEqualTo(TipoNotificacion.BIENVENIDA);
+    // ---- RF-18: bienvenida con usuario.creado; empleado.* solo traza ----
+
+    @Test
+    void usuarioCreadoGeneraBienvenidaYSeguridad() {
+        List<NotificacionNueva> n = constructor.construir(evento("usuario.creado", usuarioCreado()));
+
+        assertThat(n).extracting(NotificacionNueva::tipo)
+                .containsExactly(TipoNotificacion.BIENVENIDA, TipoNotificacion.SEGURIDAD);
+        assertThat(n).allSatisfy(x -> {
+            assertThat(x.destinatario()).isEqualTo("juan@empresa.com");
+            assertThat(x.empleadoId()).isEqualTo("E001");
+        });
+        assertThat(n.get(0).mensaje()).startsWith("Bienvenido juan@empresa.com");
+    }
+
+    @Test
+    void bienvenidaUsaNombreYApellidoSiElEventoLosTrae() {
+        List<NotificacionNueva> n = constructor.construir(evento("usuario.creado",
+                "{\"empleadoId\":\"E001\",\"nombre\":\"Juan\",\"apellido\":\"Pérez\",\"email\":\"juan@empresa.com\","
+                        + "\"tokenActivacion\":\"" + TOKEN + "\"}"));
+        assertThat(n.get(0).mensaje()).startsWith("Bienvenido Juan Pérez");
+    }
+
+    @Test
+    void empleadoCreadoYEmpleadoRetiradoSoloSonTrazaYNoGeneranNotificacion() {
+        Envelope creado = evento("empleado.creado",
+                "{\"empleadoId\":\"E001\",\"nombre\":\"Juan\",\"email\":\"juan@empresa.com\"}");
+        Envelope retirado = evento("empleado.retirado",
+                "{\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\",\"fechaRetiro\":\"2026-11-30T16:45:00Z\"}");
+
+        assertThat(constructor.esSoloTraza(creado)).isTrue();
+        assertThat(constructor.esSoloTraza(retirado)).isTrue();
+        assertThat(constructor.construir(creado)).isEmpty();
+        assertThat(constructor.construir(retirado)).isEmpty();
+        assertThat(constructor.esSoloTraza(evento("usuario.creado", usuarioCreado()))).isFalse();
+    }
+
+    // ---- RF-16: SEGURIDAD con enlace y token ----
+
+    @Test
+    void usuarioCreadoEnviaElEnlaceYElTokenDeActivacion() {
+        NotificacionNueva s = constructor.construir(evento("usuario.creado", usuarioCreado())).get(1);
+
+        assertThat(s.tipo()).isEqualTo(TipoNotificacion.SEGURIDAD);
+        assertThat(s.textoAEnviar())
+                .contains("http://localhost:8080/auth/reset-password?token=" + TOKEN)
+                .contains("Token de activación: " + TOKEN)
+                .contains("2026-10-11T12:00:00Z");
+    }
+
+    @Test
+    void usuarioRecuperacionEnviaElEnlaceYElTokenDeRecuperacion() {
+        NotificacionNueva s = constructor.construir(evento("usuario.recuperacion",
+                "{\"email\":\"juan@empresa.com\",\"tokenRecuperacion\":\"" + TOKEN
+                        + "\",\"expiraEn\":\"2026-10-10T12:30:00Z\"}")).get(0);
+
+        assertThat(s.tipo()).isEqualTo(TipoNotificacion.SEGURIDAD);
+        assertThat(s.destinatario()).isEqualTo("juan@empresa.com");
+        assertThat(s.empleadoId()).isNull();
+        assertThat(s.textoAEnviar())
+                .contains("?token=" + TOKEN)
+                .contains("Token de recuperación: " + TOKEN);
+    }
+
+    @Test
+    void elTokenSeEnviaPeroNoSeGuardaEnElMensajeDeLaApi() {
+        NotificacionNueva s = constructor.construir(evento("usuario.creado", usuarioCreado())).get(1);
+        assertThat(s.mensaje()).doesNotContain(TOKEN).doesNotContain("token=");
+        assertThat(s.textoAEnviar()).contains(TOKEN);
+    }
+
+    @Test
+    void elEnlaceBaseEsConfigurable() {
+        ConstructorNotificaciones propio = new ConstructorNotificaciones("https://app.empresa.com/reset");
+        NotificacionNueva s = propio.construir(evento("usuario.creado", usuarioCreado())).get(1);
+        assertThat(s.textoAEnviar()).contains("https://app.empresa.com/reset?token=" + TOKEN);
+    }
+
+    @Test
+    void faltaElTokenEsEventoInvalido() {
+        assertThatThrownBy(() -> constructor.construir(evento("usuario.creado",
+                "{\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\"}")))
+                .isInstanceOf(EventoInvalidoException.class)
+                .hasMessageContaining("data.tokenActivacion");
+        assertThatThrownBy(() -> constructor.construir(evento("usuario.recuperacion",
+                "{\"email\":\"juan@empresa.com\"}")))
+                .isInstanceOf(EventoInvalidoException.class)
+                .hasMessageContaining("data.tokenRecuperacion");
+    }
+
+    // ---- RF-17: CUENTA según el motivo ----
+
+    private NotificacionNueva cuenta(String tipo, String motivo, String extra) {
+        return constructor.construir(evento(tipo,
+                "{\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\",\"motivo\":\"" + motivo + "\"" + extra + "}"))
+                .get(0);
+    }
+
+    @Test
+    void cuentaDesactivadaPorVacaciones() {
+        NotificacionNueva n = cuenta("cuenta.desactivada", "VACACIONES", ",\"permanente\":false");
+        assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
         assertThat(n.destinatario()).isEqualTo("juan@empresa.com");
-        assertThat(n.empleadoId()).isEqualTo("E001");
-        assertThat(n.mensaje()).startsWith("Bienvenido Juan Pérez");
+        assertThat(n.mensaje()).contains("suspendida temporalmente").contains("vacaciones");
     }
 
     @Test
-    void empleadoRetiradoGeneraDesvinculacion() {
-        NotificacionNueva n = constructor.construir(evento("empleado.retirado",
-                "{\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\","
-                        + "\"fechaRetiro\":\"2026-11-30T16:45:00Z\",\"motivo\":\"RENUNCIA\"}"))
-                .orElseThrow();
-
-        assertThat(n.tipo()).isEqualTo(TipoNotificacion.DESVINCULACION);
-        assertThat(n.mensaje()).startsWith("Su cuenta ha sido desactivada").contains("RENUNCIA");
+    void cuentaDesactivadaPorRetiroEsLaDespedida() {
+        NotificacionNueva n = cuenta("cuenta.desactivada", "RETIRO", ",\"permanente\":true");
+        assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
+        assertThat(n.mensaje()).contains("Gracias por su trabajo").contains("permanente").contains("retiro");
     }
+
+    @Test
+    void cuentaActivadaPorActivacionInicial() {
+        NotificacionNueva n = cuenta("cuenta.activada", "ACTIVACION_INICIAL", "");
+        assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
+        assertThat(n.mensaje()).contains("activada").contains("iniciar sesión");
+    }
+
+    @Test
+    void cuentaActivadaPorFinDeVacaciones() {
+        NotificacionNueva n = cuenta("cuenta.activada", "FIN_VACACIONES", "");
+        assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
+        assertThat(n.mensaje()).contains("vacaciones han finalizado").contains("reactivada");
+    }
+
+    @Test
+    void cadaMotivoTieneUnMensajeDistinto() {
+        List<String> mensajes = List.of(
+                cuenta("cuenta.desactivada", "VACACIONES", ",\"permanente\":false").mensaje(),
+                cuenta("cuenta.desactivada", "RETIRO", ",\"permanente\":true").mensaje(),
+                cuenta("cuenta.activada", "ACTIVACION_INICIAL", "").mensaje(),
+                cuenta("cuenta.activada", "FIN_VACACIONES", "").mensaje());
+        assertThat(mensajes).doesNotHaveDuplicates();
+    }
+
+    @Test
+    void unMotivoDesconocidoNoRompeYUsaUnMensajeGenerico() {
+        assertThat(cuenta("cuenta.desactivada", "OTRO", ",\"permanente\":true").mensaje())
+                .isEqualTo("Su cuenta ha sido desactivada de forma permanente.");
+        assertThat(cuenta("cuenta.desactivada", "OTRO", ",\"permanente\":false").mensaje())
+                .isEqualTo("Su cuenta ha sido desactivada temporalmente.");
+        assertThat(cuenta("cuenta.activada", "OTRO", "").mensaje()).isEqualTo("Su cuenta ha sido activada.");
+    }
+
+    @Test
+    void cuentaSinEmpleadoIdOSinEmailEsEventoInvalido() {
+        assertThatThrownBy(() -> constructor.construir(evento("cuenta.activada",
+                "{\"email\":\"a@a.com\",\"motivo\":\"FIN_VACACIONES\"}")))
+                .isInstanceOf(EventoInvalidoException.class)
+                .hasMessageContaining("data.empleadoId");
+        assertThatThrownBy(() -> constructor.construir(evento("cuenta.desactivada",
+                "{\"empleadoId\":\"E001\",\"motivo\":\"RETIRO\"}")))
+                .isInstanceOf(EventoInvalidoException.class)
+                .hasMessageContaining("data.email");
+    }
+
+    // ---- sin cambios ----
 
     @Test
     void vacacionesProgramadasGeneraConfirmacionConLasFechas() {
         NotificacionNueva n = constructor.construir(evento("vacaciones.programadas",
                 "{\"vacacionesId\":\"V-2026-0042\",\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\","
                         + "\"fechaInicio\":\"2027-03-15\",\"fechaFin\":\"2027-03-30\",\"diasHabiles\":12}"))
-                .orElseThrow();
+                .get(0);
 
         assertThat(n.tipo()).isEqualTo(TipoNotificacion.VACACIONES);
         assertThat(n.mensaje()).startsWith("Sus vacaciones del 2027-03-15 al 2027-03-30")
@@ -63,15 +207,7 @@ class ConstructorNotificacionesTest {
 
     @Test
     void unEventoAjenoNoGeneraNotificacion() {
-        Optional<NotificacionNueva> n = constructor.construir(evento("empleado.actualizado", "{\"empleadoId\":\"E001\"}"));
-        assertThat(n).isEmpty();
-    }
-
-    @Test
-    void faltaElEmailEsEventoInvalido() {
-        assertThatThrownBy(() -> constructor.construir(evento("empleado.creado", "{\"empleadoId\":\"E001\"}")))
-                .isInstanceOf(EventoInvalidoException.class)
-                .hasMessageContaining("data.email");
+        assertThat(constructor.construir(evento("empleado.actualizado", "{\"empleadoId\":\"E001\"}"))).isEmpty();
     }
 
     @Test

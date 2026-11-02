@@ -27,6 +27,7 @@ public class BrokerConfig {
         return QueueBuilder.durable(nombre).build();
     }
 
+    // RF-18: empleado.creado y empleado.retirado solo dejan una traza (no envían nada).
     @Bean
     public Binding bindingEmpleadoCreado(Queue notificacionesQueue, TopicExchange eventosExchange) {
         return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("empleado.creado");
@@ -35,6 +36,28 @@ public class BrokerConfig {
     @Bean
     public Binding bindingEmpleadoRetirado(Queue notificacionesQueue, TopicExchange eventosExchange) {
         return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("empleado.retirado");
+    }
+
+    // RF-16: enlace y token de activación / recuperación.
+    @Bean
+    public Binding bindingUsuarioCreado(Queue notificacionesQueue, TopicExchange eventosExchange) {
+        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("usuario.creado");
+    }
+
+    @Bean
+    public Binding bindingUsuarioRecuperacion(Queue notificacionesQueue, TopicExchange eventosExchange) {
+        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("usuario.recuperacion");
+    }
+
+    // RF-17: cambios de estado de la cuenta.
+    @Bean
+    public Binding bindingCuentaActivada(Queue notificacionesQueue, TopicExchange eventosExchange) {
+        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("cuenta.activada");
+    }
+
+    @Bean
+    public Binding bindingCuentaDesactivada(Queue notificacionesQueue, TopicExchange eventosExchange) {
+        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("cuenta.desactivada");
     }
 
     @Bean

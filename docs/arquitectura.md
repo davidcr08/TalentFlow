@@ -72,7 +72,9 @@ Detalle de rutas, parámetros del Circuit Breaker y justificación de decisiones
   en vez de compartir base de datos entre servicios.
 - Desde el Reto 3, **único punto de entrada**: solo `api-gateway` publica puerto al host
   (`ports:`); todo lo demás (microservicios y bases de datos) usa `expose:` y solo es
-  alcanzable dentro de la red de Docker.
+  alcanzable dentro de la red de Docker. Única excepción (RF-20): la UI de management de
+  RabbitMQ, solo en `127.0.0.1:15672`. Desde el Reto 5 el Gateway también valida el JWT de
+  acceso y propaga la identidad (RF-19/RF-20).
 - Gateway de aplicación (código, no un enrutador declarativo como Nginx/Traefik): los retos
   futuros (5, 10) exigen que el Gateway valide JWT/JWKS y propague identidad, lo cual requiere
   lógica propia, no solo enrutamiento por labels.

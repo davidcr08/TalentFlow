@@ -52,6 +52,23 @@ Se evaluaron dos familias: un **enrutador declarativo** (Nginx, Traefik) y un **
 
 Ninguna de las tres es natural en un enrutador declarativo. Traefik aparecerá recién en el Reto 11, como balanceador de carga delante de este mismo Gateway.
 
+### Autenticación y autorización en el Gateway (RF-19 / RF-20)
+
+La validación del JWT de acceso vive **solo** en el Gateway (`microservicios/api-gateway/jwt.js`, una única implementación); los servicios
+internos no la repiten porque ninguno publica puertos al host. Las rutas públicas son `GET /health`, `POST /auth/login`,
+`POST /auth/recover-password` y `POST /auth/reset-password`; **todo lo demás que se enruta** (`/empleados/*`, `/departamentos/*`,
+`/perfiles/*`, `/notificaciones/*`, `/vacaciones/*`, `POST /auth/change-password`) exige `Authorization: Bearer <jwt>`.
+
+Responde `401` (`{"error":"Unauthorized","message","path"}`) si el token falta, está mal formado, tiene la firma inválida o alterado,
+está expirado, no trae el claim `role` o trae el claim `type` (p. ej. un token de reset de contraseña). Si es válido, el Gateway **descarta**
+cualquier `x-user-id` / `x-user-role` / `sub` que envíe el cliente y reenvía la identidad del token como `x-user-id`, `x-user-role` y `sub`
+(esta última la usa `change-password`). La tabla de rutas (`crearTablaRutas` en `app.js`) es el único lugar donde se decide qué es público y
+qué roles pueden usar cada prefijo (`roles`); hoy basta un token válido, sin restricción por rol. Sin `JWT_SECRET` (mínimo 32 caracteres) el
+Gateway no arranca. Pruebas: `npm test --workspace=api-gateway`.
+
+> Los scripts y colecciones de los Retos 3 y 4 (`docs/reto-03`, `docs/reto-04`) llaman a rutas que ahora están protegidas: para usarlos, obtenga
+> un token con `POST /auth/login` y añada `-H "Authorization: Bearer $TOKEN"` (en Bruno, la cabecera `Authorization`).
+
 ### Tabla de rutas del Gateway
 
 Enrutamiento **exactamente** el exigido por el Reto 3 — ninguna ruta adicional (ni `/docs`, ni `/openapi.json`: la documentación Swagger de cada servicio dejó de ser alcanzable desde fuera; ver los README de cada microservicio):
@@ -109,7 +126,7 @@ Go para perfiles (servicio ligero de eventos + REST); Java/Spring para notificac
 
 Se eligió RabbitMQ porque (1) un exchange `topic` mapea 1:1 el catálogo, (2) la UI de administración permite publicar a mano el mismo
 mensaje dos veces (verificación exigida), (3) el ack/nack y la reentrega son justo lo que exige la deduplicación, y (4) el volumen no justifica Kafka.
-UI: <http://localhost:15672> (solo en loopback; usuario/clave en `.env`, por defecto `talentflow` / `talentflow_dev`). El broker publica `5672` (AMQP) y `15672` (UI), ambos solo en loopback (`127.0.0.1`); los servicios nuevos solo usan `expose`.
+UI: <http://localhost:15672> (solo en loopback; usuario/clave en `.env`, por defecto `talentflow` / `talentflow_dev`). De todo el broker solo se publica `15672` (UI de administración), y únicamente en loopback (`127.0.0.1`); AMQP (`5672`) solo es alcanzable dentro de la red de Docker. Los servicios solo usan `expose`.
 
 ### Eventos
 
@@ -117,10 +134,13 @@ Ver [`docs/eventos.md`](docs/eventos.md) (topología, tabla implementada, polít
 
 | Evento | Productor | Reacción |
 |---|---|---|
-| `empleado.creado` | empleados | perfiles: perfil por defecto · notificaciones: BIENVENIDA · vacaciones: alta en réplica |
+| `empleado.creado` | empleados | perfiles: perfil por defecto · notificaciones: solo traza (RF-18) · vacaciones: alta en réplica · empleados: crea la cuenta INACTIVA (RF-09) |
 | `empleado.actualizado` | empleados | perfiles: sincroniza campos replicados |
-| `empleado.retirado` | empleados | perfiles: archiva · notificaciones: DESVINCULACION · vacaciones: marca RETIRADO · empleados: cuenta → DESACTIVADA_PERMANENTE (RF-12) |
+| `empleado.retirado` | empleados | perfiles: archiva · notificaciones: solo traza (RF-18) · vacaciones: marca RETIRADO · empleados: cuenta → DESACTIVADA_PERMANENTE (RF-12) |
 | `vacaciones.programadas` | vacaciones | notificaciones: VACACIONES |
+| `usuario.creado` | empleados | notificaciones: BIENVENIDA (RF-18) + SEGURIDAD con enlace y token de activación (RF-16) |
+| `usuario.recuperacion` | empleados | notificaciones: SEGURIDAD con enlace y token de recuperación (RF-16) |
+| `cuenta.activada` / `cuenta.desactivada` | empleados | notificaciones: CUENTA según el motivo `ACTIVACION_INICIAL`, `FIN_VACACIONES`, `VACACIONES`, `RETIRO` (RF-17; la despedida sale con `RETIRO`) |
 
 ### Vacaciones: cómo se valida que el empleado existe → opción (b), réplica por eventos
 
@@ -148,7 +168,7 @@ Reglas: 4 validaciones → `400` (fechas incoherentes, pasadas, solapamiento —
 | RNF-09 | **BD propia y volumen propio por servicio nuevo**: `database-perfiles` (`vol-perfiles`), `database-notificaciones` (`vol-notificaciones`) y `database-vacaciones` (`vol-vacaciones`), cada una con su usuario y su `init.sql`. Los datos persisten tras `docker compose down` / reinicio; solo `down -v` los borra. | `docker-compose.yml` |
 | RNF-10 | **Toda la configuración por variables de entorno** (broker, credenciales, URLs, BD): los servicios leen `BROKER_URL`/`BROKER_HOST`, `DB_*`, `PORT`, `BROKER_EXCHANGE`, etc. (ver `config.go`, `config.py`, `application.yml`); Compose las inyecta con valores tomados de `.env`. `.env.example` lista todas las variables que se pueden cambiar. | `docker-compose.yml`, `.env.example` |
 | RNF-11 | **Despliegue completo con un comando**: `docker compose up --build -d` construye y levanta gateway, 5 servicios, 4 bases de datos y el broker, en el orden correcto. Funciona incluso sin `.env` (hay valores por defecto). | `docker-compose.yml` |
-| RNF-12 | **Servicios nuevos con `expose`, nunca `ports`**: perfiles, notificaciones y vacaciones solo son alcanzables dentro de la red de Docker (y por el Gateway). El **broker sí publica `5672` y `15672`** (la Prueba 9 exige su UI), ambos solo en `127.0.0.1`. | `docker-compose.yml` |
+| RNF-12 / RF-20 | **Ningún servicio publica puertos al host**: todos usan `expose` y solo son alcanzables dentro de la red de Docker (y por el Gateway, que es el único punto de entrada, `:8080`). La única excepción es la **UI de management de RabbitMQ** (`15672`, la Prueba 9 la exige), solo en `127.0.0.1`; AMQP (`5672`) no se publica. | `docker-compose.yml` |
 | RNF-13 | **Dockerfile propio por servicio**: uno en cada carpeta de `microservicios/`. | `microservicios/*/Dockerfile` |
 | RNF-14 | **Lenguajes distintos**: Notificaciones = Java, Perfiles = Go, Vacaciones = Python, distintos entre sí y de Node (gateway, empleados) y PHP (departamentos): 5 lenguajes en total (mínimo 4). Tabla en la sección *Servicio ↔ lenguaje*. | README |
 | RNF-15 | **Nombres, envelope y payloads del Catálogo, sin modificar**: envelope `{ id, type, version, occurredAt, producer, data }` en los cuatro productores/consumidores; `data` con `empleadoId` (no `id`) y los campos que define el Catálogo de Eventos (sección 3). | `publicador-eventos.js`, `eventos.py`, `eventos.go`, `Envelope.java` |

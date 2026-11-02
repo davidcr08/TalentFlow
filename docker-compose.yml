@@ -158,10 +158,10 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-talentflow}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-talentflow_dev}
-    # El broker SÍ publica puertos (Prueba 9 exige su UI), pero solo en loopback para no
-    # exponer RabbitMQ a la red: 5672 = AMQP, 15672 = interfaz de administración.
+    # RF-20: único puerto publicado fuera del Gateway: la UI de administración (15672), y solo en
+    # loopback para no exponer RabbitMQ a la red. AMQP (5672) NO se publica: los servicios lo usan
+    # por la red interna de Docker (message-broker:5672).
     ports:
-      - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
     volumes:
       - vol-rabbitmq:/var/lib/rabbitmq
@@ -299,6 +299,8 @@ services:
       BROKER_USER: ${RABBITMQ_USER:-talentflow}
       BROKER_PASS: ${RABBITMQ_PASS:-talentflow_dev}
       BROKER_EXCHANGE: talentflow.events
+      # RF-16: base del enlace que se envía en las notificaciones de SEGURIDAD (activación / reset).
+      ENLACE_RESET_PASSWORD: ${ENLACE_RESET_PASSWORD:-http://localhost:8080/auth/reset-password}
     depends_on:
       database-notificaciones:
         condition: service_healthy
