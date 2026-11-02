@@ -1,21 +1,26 @@
 const { randomBytes } = require("node:crypto");
 const { EventoInvalido } = require("../errores");
 const { hashear } = require("../auth/password");
-const { ESTADOS_CUENTA } = require("./auth.service");
+const { ESTADOS_CUENTA } = require("../dominio/cuenta");
 
 // Reacciones del servicio de autenticación a eventos de otros servicios.
 //   RF-09  empleado.creado        -> cuenta INACTIVA + usuario.creado (token de activación)
 //   RF-10  vacaciones.iniciadas   -> ACTIVA -> SUSPENDIDA_TEMPORAL + cuenta.desactivada
 //   RF-11  vacaciones.finalizadas -> SUSPENDIDA_TEMPORAL -> ACTIVA + cuenta.activada
+//   RF-12  empleado.retirado      -> cualquier estado -> DESACTIVADA_PERMANENTE + cuenta.desactivada
+//   RF-13  vacaciones.* sobre una cuenta DESACTIVADA_PERMANENTE se ignoran: nunca se reactiva
+//   RF-14  el estado de la cuenta es el enum de dominio/cuenta.js, no un booleano
 // El "estado ACTIVO" del catálogo es el del empleado no retirado; aquí solo cuenta el estado
 // de la propia cuenta, nunca se consulta el del empleado.
 
 const EVENTOS_CONSUMIDOS = Object.freeze({
   EMPLEADO_CREADO: "empleado.creado",
   VACACIONES_INICIADAS: "vacaciones.iniciadas",
-  VACACIONES_FINALIZADAS: "vacaciones.finalizadas"
+  VACACIONES_FINALIZADAS: "vacaciones.finalizadas",
+  EMPLEADO_RETIRADO: "empleado.retirado"
 });
 
+const MOTIVO_RETIRO = "RETIRO";
 const MOTIVO_VACACIONES = "VACACIONES";
 const MOTIVO_FIN_VACACIONES = "FIN_VACACIONES";
 
@@ -156,6 +161,15 @@ function crearManejadorEventosCuentas({
 
       const cuenta = await tx.buscarPorId(empleadoId);
       if (!cuenta) return ignorar("no existe una cuenta para el empleado");
+      // RF-13 (caso borde obligatorio): DESACTIVADA_PERMANENTE es terminal. Un evento de vacaciones
+      // (p. ej. vacaciones.finalizadas que llega tarde, después de empleado.retirado) se ignora con
+      // log y NUNCA reactiva la cuenta. Se comprueba explícitamente, sin depender de `desde`.
+      if (cuenta.estado === ESTADOS_CUENTA.DESACTIVADA_PERMANENTE) {
+        return ignorar(
+          `la cuenta está ${ESTADOS_CUENTA.DESACTIVADA_PERMANENTE}: no se reactiva`,
+          cuenta.estado
+        );
+      }
       if (cuenta.estado !== desde) return ignorar(`la cuenta no está ${desde}`, cuenta.estado);
 
       const cambiada = await tx.cambiarEstado({
@@ -174,7 +188,40 @@ function crearManejadorEventosCuentas({
     };
   }
 
+  // RF-12: el retiro desactiva la cuenta de forma permanente, venga del estado que venga.
+  async function desactivarPorRetiro(tx, evento) {
+    const empleadoId = texto(evento.data, "empleadoId");
+    const ignorar = (motivo, estado) => {
+      logger("INFO", `${evento.type} ignorado: ${motivo}`, {
+        type: evento.type,
+        id: evento.id,
+        empleadoId,
+        ...(estado ? { estado } : {})
+      });
+      return "ignorado";
+    };
+
+    const cuenta = await tx.buscarPorId(empleadoId);
+    if (!cuenta) return ignorar("no existe una cuenta para el empleado");
+    // Ya permanente: se ignora sin republicar cuenta.desactivada.
+    if (cuenta.estado === ESTADOS_CUENTA.DESACTIVADA_PERMANENTE) {
+      return ignorar("la cuenta ya está DESACTIVADA_PERMANENTE", cuenta.estado);
+    }
+
+    const cambiada = await tx.desactivarPermanente(empleadoId);
+    if (!cambiada) return ignorar("la cuenta ya estaba DESACTIVADA_PERMANENTE");
+
+    await publicadorEventos.publicar("cuenta.desactivada", {
+      empleadoId,
+      email: cuenta.email,
+      motivo: MOTIVO_RETIRO,
+      permanente: true
+    });
+    return "procesado";
+  }
+
   const manejadores = {
+    [EVENTOS_CONSUMIDOS.EMPLEADO_RETIRADO]: desactivarPorRetiro,
     [EVENTOS_CONSUMIDOS.EMPLEADO_CREADO]: crearCuentaDesdeEmpleado,
     [EVENTOS_CONSUMIDOS.VACACIONES_INICIADAS]: transicion({
       desde: ESTADOS_CUENTA.ACTIVA,
@@ -216,6 +263,7 @@ module.exports = {
   crearManejadorEventosCuentas,
   parsearEnvelope,
   EVENTOS_CONSUMIDOS,
+  MOTIVO_RETIRO,
   MOTIVO_VACACIONES,
   MOTIVO_FIN_VACACIONES
 };

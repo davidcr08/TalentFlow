@@ -1,3 +1,5 @@
+const { validarEstadoCuenta } = require("../dominio/cuenta");
+
 function crearRepositorioCuentasEnMemoria() {
   let cuentas = new Map(); // email(lower) -> cuenta
   let eventosProcesados = new Set();
@@ -7,6 +9,7 @@ function crearRepositorioCuentasEnMemoria() {
 
   const repo = {
     agregar({ email, empleadoId, passwordHash, role = "USER", estado = "ACTIVA", versionToken = 0 }) {
+      validarEstadoCuenta(estado); // RF-14
       cuentas.set(email.toLowerCase(), { empleadoId, email, passwordHash, role, estado, versionToken });
     },
     // Solo para pruebas: simula el ADMIN semilla persistido (tabla admin_semilla).
@@ -54,6 +57,7 @@ function crearRepositorioCuentasEnMemoria() {
     // Compare-and-set: solo actualiza si la versión de tokens sigue siendo la esperada (el token
     // no se ha usado ya) y la cuenta no está DESACTIVADA_PERMANENTE. Devuelve true si actualizó.
     async actualizarPasswordConVersion({ empleadoId, versionEsperada, passwordHash, nuevoEstado }) {
+      validarEstadoCuenta(nuevoEstado); // RF-14
       for (const cuenta of cuentas.values()) {
         if (cuenta.empleadoId !== empleadoId) continue;
         if (cuenta.versionToken !== versionEsperada || cuenta.estado === "DESACTIVADA_PERMANENTE") {
@@ -79,10 +83,23 @@ function crearRepositorioCuentasEnMemoria() {
       return "CREADA";
     },
     async cambiarEstado({ empleadoId, estadoEsperado, nuevoEstado }) {
+      validarEstadoCuenta(estadoEsperado); // RF-14
+      validarEstadoCuenta(nuevoEstado);
       for (const cuenta of cuentas.values()) {
         if (cuenta.empleadoId !== empleadoId) continue;
         if (cuenta.estado !== estadoEsperado) return false;
         cuenta.estado = nuevoEstado;
+        return true;
+      }
+      return false;
+    },
+    // RF-12: pasa la cuenta a DESACTIVADA_PERMANENTE desde CUALQUIER otro estado (compare-and-set
+    // contra el propio estado terminal). Devuelve false si no existe o ya estaba permanente.
+    async desactivarPermanente(empleadoId) {
+      for (const cuenta of cuentas.values()) {
+        if (cuenta.empleadoId !== empleadoId) continue;
+        if (cuenta.estado === "DESACTIVADA_PERMANENTE") return false;
+        cuenta.estado = "DESACTIVADA_PERMANENTE";
         return true;
       }
       return false;

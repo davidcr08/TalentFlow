@@ -8,11 +8,12 @@ const { crearRepositorioCuentasEnMemoria } = require("../src/repository/cuentas.
 const { crearEmisorJwt, EXPIRACION_ACTIVACION_SEGUNDOS } = require("../src/auth/jwt");
 const { hashear, verificar } = require("../src/auth/password");
 const { EventoInvalido } = require("../src/errores");
+const { ESTADOS_CUENTA, VALORES_ESTADO_CUENTA, esEstadoCuenta } = require("../src/dominio/cuenta");
 
 const SECRETO = "secreto-de-pruebas-con-mas-de-32-caracteres";
 const AHORA = 1_700_000_000_000;
 
-describe("Consumo de eventos de cuentas (RF-09 / RF-10 / RF-11)", () => {
+describe("Consumo de eventos de cuentas (RF-09 a RF-14)", () => {
   let cuentas;
   let publicados;
   let fallaPublicacion;
@@ -50,6 +51,8 @@ describe("Consumo de eventos de cuentas (RF-09 / RF-10 / RF-11)", () => {
   const creado = (data = { empleadoId: "E001", email: "ana@empresa.com" }, id) => evento("empleado.creado", data, id);
   const iniciadas = (empleadoId = "E001", id) => evento("vacaciones.iniciadas", { empleadoId, email: "ana@empresa.com" }, id);
   const finalizadas = (empleadoId = "E001", id) => evento("vacaciones.finalizadas", { empleadoId, email: "ana@empresa.com" }, id);
+  const retirado = (empleadoId = "E001", id) =>
+    evento("empleado.retirado", { empleadoId, email: "ana@empresa.com", fechaRetiro: "2026-03-01T14:32:05Z" }, id);
   const soloEventos = (tipo) => publicados.filter((p) => p.tipo === tipo);
 
   const cuentaConEstado = (estado, empleadoId = "E001", email = "ana@empresa.com") =>
@@ -179,7 +182,7 @@ describe("Consumo de eventos de cuentas (RF-09 / RF-10 / RF-11)", () => {
     });
 
     it("eventos de otros tipos se ignoran sin tocar nada", async () => {
-      assert.equal(await manejador.manejar(evento("empleado.retirado", { empleadoId: "E001", email: "a@b.c" })), "ignorado");
+      assert.equal(await manejador.manejar(evento("empleado.actualizado", { empleadoId: "E001", email: "a@b.c" })), "ignorado");
       assert.equal(publicados.length, 0);
     });
   });
@@ -273,6 +276,140 @@ describe("Consumo de eventos de cuentas (RF-09 / RF-10 / RF-11)", () => {
       cuentaConEstado("SUSPENDIDA_TEMPORAL", "E011", "b@empresa.com");
       assert.equal(await manejador.manejar(finalizadas("E010")), "ignorado");
       assert.equal(await manejador.manejar(finalizadas("E011")), "procesado");
+    });
+  });
+
+  describe("RF-12: empleado.retirado", () => {
+    for (const estado of ["INACTIVA", "ACTIVA", "SUSPENDIDA_TEMPORAL"]) {
+      it(`cuenta ${estado} pasa a DESACTIVADA_PERMANENTE y publica cuenta.desactivada {RETIRO, permanente:true}`, async () => {
+        cuentaConEstado(estado);
+        assert.equal(await manejador.manejar(retirado()), "procesado");
+        assert.equal((await cuentas.buscarPorId("E001")).estado, "DESACTIVADA_PERMANENTE");
+        const salida = soloEventos("cuenta.desactivada");
+        assert.equal(salida.length, 1);
+        assert.deepEqual(salida[0].data, {
+          empleadoId: "E001",
+          email: "ana@empresa.com",
+          motivo: "RETIRO",
+          permanente: true
+        });
+        assert.strictEqual(salida[0].data.permanente, true);
+      });
+    }
+
+    it("si la cuenta ya está DESACTIVADA_PERMANENTE se ignora sin republicar", async () => {
+      cuentaConEstado("DESACTIVADA_PERMANENTE");
+      assert.equal(await manejador.manejar(retirado()), "ignorado");
+      assert.equal((await cuentas.buscarPorId("E001")).estado, "DESACTIVADA_PERMANENTE");
+      assert.equal(publicados.length, 0);
+      assert.ok(logs.some((l) => /ignorado/.test(l.mensaje) && l.estado === "DESACTIVADA_PERMANENTE"));
+    });
+
+    it("un empleado.retirado repetido (ids distintos) publica una sola vez", async () => {
+      cuentaConEstado("ACTIVA");
+      assert.equal(await manejador.manejar(retirado()), "procesado");
+      assert.equal(await manejador.manejar(retirado()), "ignorado");
+      assert.equal(soloEventos("cuenta.desactivada").length, 1);
+    });
+
+    it("el mismo evento (mismo id) entregado dos veces es un duplicado", async () => {
+      cuentaConEstado("ACTIVA");
+      assert.equal(await manejador.manejar(retirado("E001", "evt-r")), "procesado");
+      assert.equal(await manejador.manejar(retirado("E001", "evt-r")), "duplicado");
+      assert.equal(soloEventos("cuenta.desactivada").length, 1);
+    });
+
+    it("sin cuenta para el empleado (p. ej. el ADMIN semilla) se ignora con log", async () => {
+      assert.equal(await manejador.manejar(retirado("ADMIN")), "ignorado");
+      assert.equal(publicados.length, 0);
+      assert.ok(logs.some((l) => /ignorado/.test(l.mensaje)));
+    });
+
+    it("la cuenta retirada no puede iniciar sesión", async () => {
+      cuentaConEstado("ACTIVA");
+      await manejador.manejar(retirado());
+      await assert.rejects(servicioAuth.login("ana@empresa.com", "ClaveVieja#1"), { codigoEstado: 401 });
+    });
+
+    it("si falla la publicación se hace rollback: la cuenta conserva su estado y el reintento la desactiva", async () => {
+      cuentaConEstado("ACTIVA");
+      fallaPublicacion = true;
+      await assert.rejects(manejador.manejar(retirado("E001", "evt-rr")), /broker caído/);
+      assert.equal((await cuentas.buscarPorId("E001")).estado, "ACTIVA");
+      fallaPublicacion = false;
+      assert.equal(await manejador.manejar(retirado("E001", "evt-rr")), "procesado");
+      assert.equal((await cuentas.buscarPorId("E001")).estado, "DESACTIVADA_PERMANENTE");
+    });
+
+    it("sin empleadoId es un mensaje inválido", async () => {
+      await assert.rejects(manejador.manejar(evento("empleado.retirado", { email: "a@b.c" })), EventoInvalido);
+    });
+  });
+
+  describe("RF-13: vacaciones.finalizadas sobre una cuenta DESACTIVADA_PERMANENTE (caso borde obligatorio)", () => {
+    it("se ignora con log y NO se reactiva: sin cambio de estado ni evento", async () => {
+      cuentaConEstado("DESACTIVADA_PERMANENTE");
+      assert.equal(await manejador.manejar(finalizadas()), "ignorado");
+      assert.equal((await cuentas.buscarPorId("E001")).estado, "DESACTIVADA_PERMANENTE");
+      assert.equal(publicados.length, 0);
+      const log = logs.find((l) => l.type === "vacaciones.finalizadas" && l.estado === "DESACTIVADA_PERMANENTE");
+      assert.ok(log, "debe dejar un log del evento ignorado");
+      assert.match(log.mensaje, /ignorado/);
+      assert.match(log.mensaje, /no se reactiva/);
+    });
+
+    it("la cuenta sigue sin poder iniciar sesión", async () => {
+      cuentaConEstado("DESACTIVADA_PERMANENTE");
+      await manejador.manejar(finalizadas());
+      await assert.rejects(servicioAuth.login("ana@empresa.com", "ClaveVieja#1"), { codigoEstado: 401 });
+    });
+
+    it("carrera: empleado.retirado y luego vacaciones.finalizadas tardío -> la cuenta queda desactivada", async () => {
+      cuentaConEstado("SUSPENDIDA_TEMPORAL");
+      assert.equal(await manejador.manejar(retirado()), "procesado");
+      assert.equal(await manejador.manejar(finalizadas()), "ignorado");
+      assert.equal((await cuentas.buscarPorId("E001")).estado, "DESACTIVADA_PERMANENTE");
+      assert.deepEqual(publicados.map((p) => p.tipo), ["cuenta.desactivada"]);
+    });
+
+    it("el id del evento ignorado queda registrado (no se reprocesa en una reentrega)", async () => {
+      cuentaConEstado("DESACTIVADA_PERMANENTE");
+      assert.equal(await manejador.manejar(finalizadas("E001", "evt-f")), "ignorado");
+      assert.equal(await manejador.manejar(finalizadas("E001", "evt-f")), "duplicado");
+    });
+  });
+
+  describe("RF-14: el estado de cuenta es un enum, no un booleano", () => {
+    it("define exactamente los cuatro estados y no se puede modificar", () => {
+      assert.deepEqual(
+        [...VALORES_ESTADO_CUENTA].sort(),
+        ["ACTIVA", "DESACTIVADA_PERMANENTE", "INACTIVA", "SUSPENDIDA_TEMPORAL"]
+      );
+      assert.ok(Object.isFrozen(ESTADOS_CUENTA));
+      assert.throws(() => { "use strict"; ESTADOS_CUENTA.OTRO = "OTRO"; }, TypeError);
+    });
+
+    it("esEstadoCuenta rechaza booleanos, null y textos fuera del enum", () => {
+      for (const valor of [true, false, null, undefined, 1, 0, "activa", "ACTIVO", "", "BLOQUEADA"]) {
+        assert.equal(esEstadoCuenta(valor), false, `${JSON.stringify(valor)} no es un estado`);
+      }
+      for (const valor of VALORES_ESTADO_CUENTA) assert.equal(esEstadoCuenta(valor), true);
+    });
+
+    it("los repositorios rechazan valores fuera del enum", async () => {
+      assert.throws(() => cuentaConEstado(true), TypeError);
+      cuentaConEstado("ACTIVA");
+      await assert.rejects(
+        cuentas.cambiarEstado({ empleadoId: "E001", estadoEsperado: "ACTIVA", nuevoEstado: false }),
+        TypeError
+      );
+      assert.equal((await cuentas.buscarPorId("E001")).estado, "ACTIVA");
+    });
+
+    it("las cuentas guardan el estado como texto del enum, nunca como booleano", async () => {
+      await manejador.manejar(creado());
+      assert.equal(typeof (await cuentas.buscarPorId("E001")).estado, "string");
+      assert.equal((await cuentas.buscarPorId("E001")).estado, ESTADOS_CUENTA.INACTIVA);
     });
   });
 

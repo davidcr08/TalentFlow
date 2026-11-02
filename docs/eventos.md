@@ -21,7 +21,7 @@ Documento vivo. La fuente de verdad de nombres, productores, consumidores y carg
 |---|---|---|---|
 | `empleado.creado` | empleados-service  ✅ | perfiles (`perfiles-service.q`), notificaciones (`notificaciones-service.q`), vacaciones (`vacaciones-service.q`), **empleados** (`empleados-service.q`, RF-09) | 4 / 5 |
 | `empleado.actualizado` | empleados-service  ✅ | perfiles | 4 |
-| `empleado.retirado` | empleados-service  ✅ | perfiles, notificaciones, vacaciones | 4 |
+| `empleado.retirado` | empleados-service  ✅ | perfiles, notificaciones, vacaciones, **empleados** (`empleados-service.q`, RF-12) | 4 / 5 |
 | `vacaciones.programadas` | **vacaciones-service** ✅ | notificaciones | 4 |
 | `usuario.creado` | empleados-service ✅ | _(ninguno aún)_ | 5 |
 | `cuenta.activada` | empleados-service ✅ | _(ninguno aún)_ | 5 |
@@ -76,18 +76,22 @@ Sin `empleadoId` y `email` los consumidores rechazan el mensaje como inválido.
 (`motivo` = `ACTIVACION_INICIAL`) y el consumo de `vacaciones.finalizadas` (`motivo` = `FIN_VACACIONES`).
 **Pendiente:** contrastar la carga con el Catálogo de Eventos, que no está en el repositorio.
 
-### Eventos de cuentas (Reto 5, RF-09 a RF-11)
+### Eventos de cuentas (Reto 5, RF-09 a RF-14)
 
 `empleados-service` actúa también como servicio de autenticación y consume, en la cola durable `empleados-service.q`
-(routing keys `empleado.creado`, `vacaciones.iniciadas`, `vacaciones.finalizadas`):
+(routing keys `empleado.creado`, `empleado.retirado`, `vacaciones.iniciadas`, `vacaciones.finalizadas`):
 
 | Consume | Efecto sobre la cuenta | Publica (`data`) |
 |---|---|---|
 | `empleado.creado` | Crea la cuenta `INACTIVA`, rol `USER`, sin contraseña válida. Si ya existe cuenta con ese `empleadoId` o `email` (o el email es el del admin semilla): se ignora con log. | `usuario.creado`: `empleadoId, email, tokenActivacion, expiraEn` |
 | `vacaciones.iniciadas` | `ACTIVA` → `SUSPENDIDA_TEMPORAL`. Cualquier otro estado (o sin cuenta): se ignora con log. | `cuenta.desactivada`: `empleadoId, email, motivo: "VACACIONES", permanente: false` |
-| `vacaciones.finalizadas` | Solo `SUSPENDIDA_TEMPORAL` → `ACTIVA`. Cualquier otro estado: se ignora con log. | `cuenta.activada`: `empleadoId, email, motivo: "FIN_VACACIONES"` |
+| `vacaciones.finalizadas` | Solo `SUSPENDIDA_TEMPORAL` → `ACTIVA`. Cualquier otro estado: se ignora con log. **RF-13 (caso borde):** sobre una cuenta `DESACTIVADA_PERMANENTE` se ignora con log y **no** se reactiva. | `cuenta.activada`: `empleadoId, email, motivo: "FIN_VACACIONES"` |
+| `empleado.retirado` (RF-12) | Si la cuenta no está ya `DESACTIVADA_PERMANENTE`, pasa a ese estado desde cualquier otro (`INACTIVA`, `ACTIVA`, `SUSPENDIDA_TEMPORAL`). Si ya lo estaba (o no hay cuenta): se ignora con log, **sin republicar**. | `cuenta.desactivada`: `empleadoId, email, motivo: "RETIRO", permanente: true` |
 
 - Las reacciones de vacaciones solo miran el **estado de la cuenta**; nunca consultan el estado del empleado.
+- **RF-14**: el estado de la cuenta es un enum (`INACTIVA`, `ACTIVA`, `SUSPENDIDA_TEMPORAL`, `DESACTIVADA_PERMANENTE`) definido en
+  `src/dominio/cuenta.js`, respaldado por el `CHECK` de la columna `cuentas.estado`; nunca un booleano. `DESACTIVADA_PERMANENTE` es terminal:
+  solo se sale de él con una intervención manual en la BD, nunca por un evento.
 - `tokenActivacion` es el mismo JWT `RESET_PASSWORD` de `POST /auth/reset-password` (vigencia `JWT_ACTIVACION_EXPIRA_SEGUNDOS`,
   24 h por defecto); `expiraEn` es su `exp` en ISO-8601 UTC.
 - Mensajes con `data.empleadoId` (y `data.email` en `empleado.creado`) ausente → inválidos: `reject` sin reencolar.

@@ -1,6 +1,7 @@
 const { AppError } = require("../errores");
 const { verificar, hashear } = require("../auth/password");
 const { validarPassword } = require("../auth/politica-password");
+const { ESTADOS_CUENTA } = require("../dominio/cuenta");
 
 // RF-08
 const {
@@ -11,12 +12,7 @@ const {
 
 
 const ROLES = Object.freeze({ ADMIN: "ADMIN", USER: "USER" });
-const ESTADOS_CUENTA = Object.freeze({
-  ACTIVA: "ACTIVA",
-  INACTIVA: "INACTIVA",
-  SUSPENDIDA_TEMPORAL: "SUSPENDIDA_TEMPORAL",
-  DESACTIVADA_PERMANENTE: "DESACTIVADA_PERMANENTE"
-});
+// RF-14: el enum de estados vive en dominio/cuenta.js (se sigue exportando desde aquí).
 
 // RF-01: mismo mensaje para credenciales incorrectas, email inexistente o cuenta no ACTIVA,
 // para no revelar si una cuenta existe ni en qué estado está.

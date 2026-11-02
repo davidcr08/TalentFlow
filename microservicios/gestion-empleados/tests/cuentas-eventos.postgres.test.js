@@ -17,7 +17,7 @@ const { EventoInvalido } = require("../src/errores");
 const URL_BD = process.env.TEST_DB_URL;
 const SECRETO = "secreto-de-pruebas-con-mas-de-32-caracteres";
 
-describe("Eventos de cuentas contra PostgreSQL (RF-09 / RF-10 / RF-11)", { skip: !URL_BD && "sin TEST_DB_URL" }, () => {
+describe("Eventos de cuentas contra PostgreSQL (RF-09 a RF-14)", { skip: !URL_BD && "sin TEST_DB_URL" }, () => {
   let pool;
   let repo;
   let publicados;
@@ -185,6 +185,55 @@ describe("Eventos de cuentas contra PostgreSQL (RF-09 / RF-10 / RF-11)", { skip:
         assert.equal(publicados.length, 0);
       });
     }
+
+    it("RF-13: finalizadas en DESACTIVADA_PERMANENTE no reactiva la cuenta", async () => {
+      await conCuenta("DESACTIVADA_PERMANENTE");
+      assert.equal(await manejador.manejar(sobre("vacaciones.finalizadas", datos)), "ignorado");
+      assert.equal((await cuenta("E1")).estado, "DESACTIVADA_PERMANENTE");
+      assert.equal(publicados.length, 0);
+    });
+
+    for (const estado of ["INACTIVA", "ACTIVA", "SUSPENDIDA_TEMPORAL"]) {
+      it(`RF-12: empleado.retirado en ${estado} -> DESACTIVADA_PERMANENTE y cuenta.desactivada {RETIRO, permanente:true}`, async () => {
+        await conCuenta(estado);
+        assert.equal(await manejador.manejar(sobre("empleado.retirado", datos)), "procesado");
+        assert.equal((await cuenta("E1")).estado, "DESACTIVADA_PERMANENTE");
+        const s = salidas("cuenta.desactivada");
+        assert.equal(s.length, 1);
+        assert.equal(s[0].data.motivo, "RETIRO");
+        assert.strictEqual(s[0].data.permanente, true);
+        assert.equal(s[0].data.email, "ana@x.com");
+      });
+    }
+
+    it("RF-12: empleado.retirado en DESACTIVADA_PERMANENTE se ignora sin republicar", async () => {
+      await conCuenta("DESACTIVADA_PERMANENTE");
+      assert.equal(await manejador.manejar(sobre("empleado.retirado", datos)), "ignorado");
+      assert.equal(publicados.length, 0);
+    });
+
+    it("RF-12: cinco empleado.retirado simultáneos (ids distintos) publican una sola vez", async () => {
+      await conCuenta("ACTIVA");
+      const resultados = await Promise.all(
+        Array.from({ length: 5 }, () => manejador.manejar(sobre("empleado.retirado", datos)))
+      );
+      assert.equal(resultados.filter((r) => r === "procesado").length, 1);
+      assert.equal(salidas("cuenta.desactivada").length, 1);
+    });
+
+    it("RF-12: si falla la publicación, el estado vuelve a ACTIVA (ROLLBACK)", async () => {
+      await conCuenta("ACTIVA");
+      fallaPublicacion = true;
+      await assert.rejects(manejador.manejar(sobre("empleado.retirado", datos, "rb3")), /broker caído/);
+      assert.equal((await cuenta("E1")).estado, "ACTIVA");
+      assert.deepEqual(await idsRegistrados(), []);
+    });
+
+    it("RF-14: la BD rechaza un estado fuera del enum", async () => {
+      await conCuenta("ACTIVA");
+      await assert.rejects(pool.query("UPDATE cuentas SET estado = 'ACTIVO' WHERE empleado_id = 'E1'"), /cuentas_estado_check/);
+      await assert.rejects(pool.query("UPDATE cuentas SET estado = 'true' WHERE empleado_id = 'E1'"), /cuentas_estado_check/);
+    });
 
     it("dos iniciadas simultáneas (ids distintos): solo una suspende y publica", async () => {
       await conCuenta("ACTIVA");

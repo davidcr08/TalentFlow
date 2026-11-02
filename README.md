@@ -119,7 +119,7 @@ Ver [`docs/eventos.md`](docs/eventos.md) (topología, tabla implementada, polít
 |---|---|---|
 | `empleado.creado` | empleados | perfiles: perfil por defecto · notificaciones: BIENVENIDA · vacaciones: alta en réplica |
 | `empleado.actualizado` | empleados | perfiles: sincroniza campos replicados |
-| `empleado.retirado` | empleados | perfiles: archiva · notificaciones: DESVINCULACION · vacaciones: marca RETIRADO |
+| `empleado.retirado` | empleados | perfiles: archiva · notificaciones: DESVINCULACION · vacaciones: marca RETIRADO · empleados: cuenta → DESACTIVADA_PERMANENTE (RF-12) |
 | `vacaciones.programadas` | vacaciones | notificaciones: VACACIONES |
 
 ### Vacaciones: cómo se valida que el empleado existe → opción (b), réplica por eventos

@@ -193,7 +193,7 @@ Los resultados de las pruebas del Reto 1 se documentan en `docs/reto-01/pruebas.
 - **BD**: `cuentas` gana `token_version` y el estado `DESACTIVADA_PERMANENTE`. En volúmenes ya creados `init.sql` no se reejecuta:
   aplica los `ALTER TABLE` del final de la sección `cuentas` a mano o usa `docker compose down -v`.
 
-## Eventos de cuentas (RF-09 / RF-10 / RF-11)
+## Eventos de cuentas (RF-09 a RF-14)
 
 Además de la API, el servicio consume eventos del broker (cola `empleados-service.q`, ver `docs/eventos.md`):
 
@@ -205,6 +205,16 @@ Además de la API, el servicio consume eventos del broker (cola `empleados-servi
   (`motivo: "VACACIONES"`, `permanente: false`).
 - **RF-11 `vacaciones.finalizadas`** → solo si la cuenta está `SUSPENDIDA_TEMPORAL` pasa a `ACTIVA` y publica `cuenta.activada`
   (`motivo: "FIN_VACACIONES"`).
+- **RF-12 `empleado.retirado`** → si la cuenta no está ya `DESACTIVADA_PERMANENTE`, pasa a ese estado (desde `INACTIVA`, `ACTIVA` o
+  `SUSPENDIDA_TEMPORAL`) y publica `cuenta.desactivada` con `motivo: "RETIRO"` y `permanente: true`. Si ya estaba permanente (o no hay
+  cuenta) se ignora con log, sin republicar. El `UPDATE ... WHERE estado <> 'DESACTIVADA_PERMANENTE'` es atómico: varios retiros
+  simultáneos publican una sola vez.
+- **RF-13 (caso borde obligatorio)** → si llega `vacaciones.finalizadas` sobre una cuenta `DESACTIVADA_PERMANENTE`, se ignora con log
+  (`"vacaciones.finalizadas ignorado: la cuenta está DESACTIVADA_PERMANENTE: no se reactiva"`) y **no** se reactiva. Cubre la carrera en la
+  que el retiro se procesa antes que un `vacaciones.finalizadas` que llega tarde. Lo mismo vale para `vacaciones.iniciadas`.
+- **RF-14** → el estado de la cuenta es un enum (`INACTIVA`, `ACTIVA`, `SUSPENDIDA_TEMPORAL`, `DESACTIVADA_PERMANENTE`) definido en
+  `src/dominio/cuenta.js`, no un booleano. Los repositorios rechazan cualquier valor fuera del enum y la columna `cuentas.estado` tiene un
+  `CHECK` con los mismos cuatro valores.
 
 Cómo está hecho (`src/services/cuentas-eventos.service.js`, `src/events/consumidor-eventos.js`):
 

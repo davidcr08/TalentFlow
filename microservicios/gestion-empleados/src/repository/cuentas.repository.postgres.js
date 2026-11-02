@@ -1,3 +1,5 @@
+const { validarEstadoCuenta, ESTADOS_CUENTA } = require("../dominio/cuenta");
+
 const COLUMNAS = `c.empleado_id, e.email, c.password_hash, c.role, c.estado, c.token_version`;
 
 function aCuenta(fila) {
@@ -81,6 +83,7 @@ function crearOperaciones(ejecutor) {
     // token_version solo si la versión sigue siendo la esperada. Dos usos concurrentes del mismo
     // token no pueden ganar los dos: el segundo no encuentra fila y devuelve false.
     async actualizarPasswordConVersion({ empleadoId, versionEsperada, passwordHash, nuevoEstado }) {
+      validarEstadoCuenta(nuevoEstado); // RF-14
       const resultado = await ejecutor.query(
         `UPDATE cuentas
             SET password_hash = $3,
@@ -124,9 +127,22 @@ function crearOperaciones(ejecutor) {
     // RF-10/11: compare-and-set del estado. Solo cambia si la cuenta sigue en `estadoEsperado`;
     // así un evento concurrente o repetido no puede pisar otra transición.
     async cambiarEstado({ empleadoId, estadoEsperado, nuevoEstado }) {
+      validarEstadoCuenta(estadoEsperado); // RF-14
+      validarEstadoCuenta(nuevoEstado);
       const resultado = await ejecutor.query(
         `UPDATE cuentas SET estado = $3 WHERE empleado_id = $1 AND estado = $2`,
         [empleadoId, estadoEsperado, nuevoEstado]
+      );
+      return resultado.rowCount === 1;
+    },
+
+    // RF-12: pasa la cuenta a DESACTIVADA_PERMANENTE desde CUALQUIER otro estado, en un solo UPDATE
+    // atómico. Si ya estaba permanente (o no existe) no encuentra fila y devuelve false, así que un
+    // empleado.retirado repetido o concurrente no puede republicar el evento.
+    async desactivarPermanente(empleadoId) {
+      const resultado = await ejecutor.query(
+        `UPDATE cuentas SET estado = $2 WHERE empleado_id = $1 AND estado <> $2`,
+        [empleadoId, ESTADOS_CUENTA.DESACTIVADA_PERMANENTE]
       );
       return resultado.rowCount === 1;
     }

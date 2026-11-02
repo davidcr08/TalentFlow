@@ -153,8 +153,26 @@ describe(
       assert.equal(salida("cuenta.desactivada").length, antes + 1);
     });
 
-    it("eventos que no son de su interés (otra routing key) ni siquiera llegan a la cola", async () => {
+    it("empleado.retirado -> DESACTIVADA_PERMANENTE y cuenta.desactivada {RETIRO, permanente:true} (RF-12)", async () => {
+      await pool.query("UPDATE cuentas SET estado = 'ACTIVA' WHERE empleado_id = 'E1'");
+      const antes = salida("cuenta.desactivada").length;
       publicar("empleado.retirado", { empleadoId: "E1", email: "ana@x.com" });
+      const evento = await esperar(() => salida("cuenta.desactivada")[antes]);
+      assert.equal(evento.data.motivo, "RETIRO");
+      assert.strictEqual(evento.data.permanente, true);
+      assert.equal(await estado("E1"), "DESACTIVADA_PERMANENTE");
+    });
+
+    it("vacaciones.finalizadas sobre una cuenta DESACTIVADA_PERMANENTE no la reactiva (RF-13)", async () => {
+      const antes = salida("cuenta.activada").length;
+      publicar("vacaciones.finalizadas", { empleadoId: "E1", email: "ana@x.com" });
+      await new Promise((r) => setTimeout(r, 400));
+      assert.equal(await estado("E1"), "DESACTIVADA_PERMANENTE");
+      assert.equal(salida("cuenta.activada").length, antes);
+    });
+
+    it("eventos que no son de su interés (otra routing key) ni siquiera llegan a la cola", async () => {
+      publicar("empleado.actualizado", { empleadoId: "E1", email: "ana@x.com" });
       await new Promise((r) => setTimeout(r, 300));
       const { messageCount } = await canal.checkQueue(COLA);
       assert.equal(messageCount, 0);

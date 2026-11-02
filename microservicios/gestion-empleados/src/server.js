@@ -118,7 +118,7 @@ async function iniciarServidor() {
       console.log(`Documentación Swagger en http://localhost:${PUERTO}/docs`);
     });
 
-    // RF-09/RF-10/RF-11: consume empleado.creado y vacaciones.iniciadas/finalizadas. Va al final,
+    // RF-09 a RF-13: consume empleado.creado, empleado.retirado y vacaciones.iniciadas/finalizadas. Va al final,
     // con la BD y el administrador semilla ya listos; si el broker no está, reintenta solo.
     crearConsumidorEventos({
       manejador: crearManejadorEventosCuentas({

@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS cuentas (
     password_hash  VARCHAR(300) NOT NULL,
     role           VARCHAR(10)  NOT NULL DEFAULT 'USER'
                     CHECK (role IN ('ADMIN', 'USER')),
+    -- RF-14: el estado es un ENUM de cuatro valores (nunca un booleano); mismos valores que
+    -- ESTADOS_CUENTA en src/dominio/cuenta.js. DESACTIVADA_PERMANENTE es terminal (RF-12/RF-13).
     estado         VARCHAR(30)  NOT NULL DEFAULT 'ACTIVA'
                     CHECK (estado IN ('ACTIVA', 'INACTIVA', 'SUSPENDIDA_TEMPORAL', 'DESACTIVADA_PERMANENTE')),
     -- RF-04: versión de los tokens de reset de la cuenta. Cada token lleva la versión vigente al
@@ -71,7 +73,7 @@ CREATE TABLE IF NOT EXISTS admin_semilla (
     actualizado_en TIMESTAMP NOT NULL DEFAULT now()
 );
 
--- RF-09/RF-10/RF-11: deduplicación de eventos consumidos (Catálogo de Eventos, sección 2.1).
+-- RF-09 a RF-13: deduplicación de eventos consumidos (Catálogo de Eventos, sección 2.1).
 -- El INSERT del id y el efecto del evento van en la MISMA transacción: si el efecto falla, el id
 -- también se deshace y la reentrega del broker reintenta; un id repetido no inserta y se descarta.
 CREATE TABLE IF NOT EXISTS eventos_procesados (
