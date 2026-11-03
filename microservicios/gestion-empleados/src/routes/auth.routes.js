@@ -1,5 +1,8 @@
 const { Router } = require("express");
 
+// RF-21: nombre (en minúsculas, como lo entrega Node) de la cabecera con el `sub` que pone el Gateway.
+const CABECERA_USER_ID = "x-user-id";
+
 function crearRouterAuth(servicioAuth) {
   const router = Router();
 
@@ -34,10 +37,11 @@ function crearRouterAuth(servicioAuth) {
   });
 
   
-    // RF-06: cambio de contraseña con identidad reenviada por el Gateway
+    // RF-06 / RF-24: cambio de contraseña SIEMPRE sobre la cuenta del token: el Gateway reenvía
+  // el `sub` validado en X-User-Id (RF-21); el cuerpo no puede indicar otra cuenta.
   router.post("/auth/change-password", async (req, res, next) => {
     try {
-      const empleadoId = req.headers.sub;
+      const empleadoId = req.headers[CABECERA_USER_ID];
       const { currentPassword, newPassword } = req.body ?? {};
 
       res.status(200).json(

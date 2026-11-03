@@ -5,6 +5,8 @@ const http = require("node:http");
 
 const { crearApp } = require("../app");
 const { verificarAutorizacion } = require("../jwt");
+const { autorizar } = require("../autorizacion");
+const { CABECERA_USER_ID, CABECERA_USER_ROLE } = require("../identidad");
 
 const SECRETO = "secreto-de-pruebas-con-mas-de-32-caracteres";
 const AHORA = 1_700_000_000_000;
@@ -180,9 +182,8 @@ describe("RF-19 / RF-20: el Gateway protege los endpoints y propaga la identidad
     const r = await llamar("GET", "/empleados/E001?x=1", { headers: { authorization: bearer(token()) } });
     assert.equal(r.status, 200);
     assert.equal(ultima.url, "/empleados/E001?x=1");
-    assert.equal(ultima.headers["x-user-id"], "E001");
-    assert.equal(ultima.headers["x-user-role"], "USER");
-    assert.equal(ultima.headers.sub, "E001");
+    assert.equal(ultima.headers[CABECERA_USER_ID.toLowerCase()], "E001");
+    assert.equal(ultima.headers[CABECERA_USER_ROLE.toLowerCase()], "USER");
   });
 
   it("la identidad enviada por el cliente se descarta y se sustituye por la del token", async () => {
@@ -196,7 +197,7 @@ describe("RF-19 / RF-20: el Gateway protege los endpoints y propaga la identidad
     });
     assert.equal(ultima.headers["x-user-id"], "E002");
     assert.equal(ultima.headers["x-user-role"], "USER");
-    assert.equal(ultima.headers.sub, "E002");
+    assert.equal(ultima.headers.sub, undefined, "el sub heredado tampoco llega a los servicios");
   });
 
   it("también en rutas públicas se borran las cabeceras de identidad falsas", async () => {
@@ -250,6 +251,130 @@ describe("RF-19 / RF-20: el Gateway protege los endpoints y propaga la identidad
     assert.equal((await r.json()).message, "Ruta no enrutada por el API Gateway");
   });
 
+  describe("RF-21: identidad por cabeceras", () => {
+    it("las constantes son X-User-Id y X-User-Role", () => {
+      assert.equal(CABECERA_USER_ID, "X-User-Id");
+      assert.equal(CABECERA_USER_ROLE, "X-User-Role");
+    });
+
+    it("se descartan variantes de mayúsculas de las cabeceras falsas", async () => {
+      await llamar("GET", "/empleados", {
+        headers: {
+          authorization: bearer(token({ sub: "E005", role: "USER" })),
+          "X-User-Id": "ADMIN",
+          "X-USER-ROLE": "ADMIN",
+          "Sub": "ADMIN"
+        }
+      });
+      assert.equal(ultima.headers["x-user-id"], "E005");
+      assert.equal(ultima.headers["x-user-role"], "USER");
+    });
+
+    for (const ruta of ["/auth/login", "/auth/recover-password", "/auth/reset-password"]) {
+      it(`ruta pública ${ruta}: no llegan cabeceras de identidad enviadas por el cliente`, async () => {
+        await llamar("POST", ruta, {
+          headers: { "X-User-Id": "ADMIN", "X-User-Role": "ADMIN", sub: "ADMIN" },
+          cuerpo: { x: 1 }
+        });
+        assert.equal(ultima.headers["x-user-id"], undefined);
+        assert.equal(ultima.headers["x-user-role"], undefined);
+        assert.equal(ultima.headers.sub, undefined);
+      });
+    }
+
+    it("con un token ADMIN el servicio recibe X-User-Role: ADMIN y el sub del token", async () => {
+      await llamar("GET", "/empleados", { headers: { authorization: bearer(token({ sub: "ADMIN", role: "ADMIN" })) } });
+      assert.equal(ultima.headers["x-user-id"], "ADMIN");
+      assert.equal(ultima.headers["x-user-role"], "ADMIN");
+    });
+  });
+
+  describe("RF-22 a RF-25: autorización por rol", () => {
+    const admin = () => ({ authorization: bearer(token({ sub: "ADMIN", role: "ADMIN" })) });
+    const user = (sub = "E001") => ({ authorization: bearer(token({ sub, role: "USER" })) });
+
+    const escrituras = [
+      ["DELETE", "/empleados/E001"],
+      ["POST", "/empleados"],
+      ["PUT", "/empleados/E001"],
+      ["POST", "/departamentos"],
+      ["DELETE", "/departamentos/IT"],
+      ["POST", "/vacaciones"],
+      ["POST", "/perfiles"],
+      ["DELETE", "/perfiles/E001"],
+      ["POST", "/notificaciones"]
+    ];
+
+    for (const [metodo, ruta] of escrituras) {
+      it(`ADMIN: ${metodo} ${ruta} -> pasa al servicio (RF-22)`, async () => {
+        ultima = undefined;
+        const r = await llamar(metodo, ruta, { headers: admin() });
+        assert.equal(r.status, 200);
+        assert.equal(ultima.url, ruta);
+      });
+
+      it(`USER: ${metodo} ${ruta} -> 403, no llega al servicio (RF-23)`, async () => {
+        ultima = undefined;
+        const r = await llamar(metodo, ruta, { headers: user() });
+        assert.equal(r.status, 403);
+        const cuerpo = await r.json();
+        assert.equal(cuerpo.error, "Forbidden");
+        assert.equal(cuerpo.path, ruta);
+        assert.equal(ultima, undefined);
+      });
+    }
+
+    for (const ruta of ["/empleados", "/empleados/E002", "/departamentos", "/perfiles/E002", "/notificaciones", "/vacaciones"]) {
+      it(`USER: GET ${ruta} -> pasa (lectura, RF-23)`, async () => {
+        ultima = undefined;
+        assert.equal((await llamar("GET", ruta, { headers: user() })).status, 200);
+        assert.equal(ultima.url, ruta);
+      });
+    }
+
+    it("USER: POST /auth/change-password -> pasa, con su propia identidad en X-User-Id (RF-24)", async () => {
+      const r = await llamar("POST", "/auth/change-password", {
+        headers: user("E007"),
+        cuerpo: { currentPassword: "a", newPassword: "b", empleadoId: "E999", sub: "E999" }
+      });
+      assert.equal(r.status, 200);
+      assert.equal(ultima.headers["x-user-id"], "E007");
+    });
+
+    it("USER: PUT /perfiles/{su id} -> 200 (RF-24)", async () => {
+      ultima = undefined;
+      const r = await llamar("PUT", "/perfiles/E001", { headers: user("E001"), cuerpo: { cargo: "x" } });
+      assert.equal(r.status, 200);
+      assert.equal(ultima.url, "/perfiles/E001");
+    });
+
+    it("USER: PUT /perfiles/{otro id} -> 403 y NO 401 (RF-24)", async () => {
+      ultima = undefined;
+      const r = await llamar("PUT", "/perfiles/E002", { headers: user("E001"), cuerpo: { cargo: "x" } });
+      assert.equal(r.status, 403);
+      assert.equal(ultima, undefined);
+    });
+
+    it("ADMIN: PUT /perfiles/{cualquier id} -> 200", async () => {
+      assert.equal((await llamar("PUT", "/perfiles/E002", { headers: admin(), cuerpo: {} })).status, 200);
+    });
+
+    it("sin token sigue siendo 401 (no 403), también en rutas de escritura", async () => {
+      assert.equal((await llamar("DELETE", "/empleados/E001")).status, 401);
+      assert.equal((await llamar("PUT", "/perfiles/E001")).status, 401);
+    });
+
+    it("un rol desconocido solo con token válido recibe 403 hasta en lecturas", async () => {
+      const r = await llamar("GET", "/empleados", { headers: { authorization: bearer(token({ role: "AUDITOR" })) } });
+      assert.equal(r.status, 403);
+    });
+
+    it("las cabeceras falsas no dan permisos: un USER con X-User-Role: ADMIN sigue sin poder escribir", async () => {
+      const r = await llamar("DELETE", "/empleados/E001", { headers: { ...user(), "X-User-Role": "ADMIN" } });
+      assert.equal(r.status, 403);
+    });
+  });
+
   it("si el servicio interno no responde: 503 JSON (con token válido)", async () => {
     const app = crearApp({
       secreto: SECRETO,
@@ -274,5 +399,69 @@ describe("RF-19 / RF-20: el Gateway protege los endpoints y propaga la identidad
     } finally {
       await new Promise((r) => s.close(r));
     }
+  });
+});
+
+describe("RF-25: autorizar() — orden de la regla", () => {
+  const caso = (role, metodo, ruta, sub = "E001") => autorizar({ role, sub, metodo, ruta });
+
+  it("1) ADMIN: cualquier método y ruta", () => {
+    for (const metodo of ["GET", "POST", "PUT", "PATCH", "DELETE"]) {
+      const r = caso("ADMIN", metodo, "/empleados/E001");
+      assert.equal(r.permitido, true);
+      assert.equal(r.regla, "admin");
+    }
+    assert.equal(caso("ADMIN", "PUT", "/perfiles/E999", "ADMIN").permitido, true);
+  });
+
+  it("2) USER + GET: permite en cualquier ruta", () => {
+    for (const ruta of ["/empleados", "/departamentos/IT", "/perfiles/E002", "/notificaciones", "/vacaciones/V1"]) {
+      const r = caso("USER", "GET", ruta);
+      assert.equal(r.permitido, true);
+      assert.equal(r.regla, "user-lectura");
+    }
+    assert.equal(caso("USER", "get", "/empleados").permitido, true);
+  });
+
+  it("3) USER dueño: POST /auth/change-password y PUT /perfiles/{su id}", () => {
+    assert.equal(caso("USER", "POST", "/auth/change-password").regla, "user-duenio");
+    assert.equal(caso("USER", "PUT", "/perfiles/E001").regla, "user-duenio");
+    assert.equal(caso("USER", "PUT", "/perfiles/E001/").permitido, true);
+    assert.equal(caso("USER", "PUT", "/perfiles/%45001").permitido, true, "%45 = E");
+  });
+
+  it("4) cualquier otro caso: denegado", () => {
+    const denegados = [
+      ["USER", "PUT", "/perfiles/E002"],
+      ["USER", "PUT", "/perfiles/e001"],
+      ["USER", "PUT", "/perfiles/E001/otra"],
+      ["USER", "PUT", "/perfiles/E001/../E002"],
+      ["USER", "PUT", "/perfiles/E001%2F..%2FE002"],
+      ["USER", "PUT", "/perfiles/%E0%A4%A"],
+      ["USER", "PUT", "/perfiles"],
+      ["USER", "PUT", "/empleados/E001"],
+      ["USER", "PATCH", "/perfiles/E001"],
+      ["USER", "DELETE", "/perfiles/E001"],
+      ["USER", "DELETE", "/empleados/E001"],
+      ["USER", "POST", "/empleados"],
+      ["USER", "POST", "/departamentos"],
+      ["USER", "POST", "/vacaciones"],
+      ["USER", "POST", "/auth/reset-password-x"],
+      ["USER", "PUT", "/auth/change-password"],
+      ["USER", "HEAD", "/empleados"],
+      ["AUDITOR", "GET", "/empleados"],
+      [undefined, "GET", "/empleados"],
+      [null, "DELETE", "/empleados/E001"]
+    ];
+    for (const [role, metodo, ruta] of denegados) {
+      const r = caso(role, metodo, ruta);
+      assert.equal(r.permitido, false, `${role} ${metodo} ${ruta}`);
+      assert.equal(r.regla, "denegado");
+    }
+  });
+
+  it("el id de /perfiles se compara con el sub, no con el cuerpo ni con otra fuente", () => {
+    assert.equal(autorizar({ role: "USER", sub: "E002", metodo: "PUT", ruta: "/perfiles/E001" }).permitido, false);
+    assert.equal(autorizar({ role: "USER", sub: "E002", metodo: "PUT", ruta: "/perfiles/E002" }).permitido, true);
   });
 });

@@ -1,19 +1,16 @@
 const express = require("express");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const { verificarAutorizacion, SECRETO_MINIMO } = require("./jwt");
+const { eliminarCabecerasDeIdentidad, propagarIdentidad } = require("./identidad");
+const { autorizar, MENSAJE_PROHIBIDO } = require("./autorizacion");
 
 const TIMEOUT_HEALTH_MS = 2000;
 
-// Cabeceras de identidad que SOLO el Gateway puede poner. Se borran de toda petición entrante
-// (también de las públicas) para que ningún cliente pueda hacerse pasar por otro usuario.
-// `sub` se mantiene por compatibilidad con empleados-service (RF-06 lee req.headers.sub).
-const CABECERAS_IDENTIDAD = ["x-user-id", "x-user-role", "sub"];
-
 /**
- * Tabla de rutas: ÚNICO lugar donde se decide qué se enruta, qué es público y quién puede qué
- * (RF-19 / RF-20). Todo lo que NO figura como público exige un JWT de acceso válido.
+ * Tabla de rutas: dónde se enruta cada prefijo y qué rutas son públicas (RF-19 / RF-20). Todo lo
+ * que NO figura como público exige un JWT de acceso válido y pasa por la autorización por rol
+ * (RF-22 a RF-25, autorizacion.js).
  *   publicas: [[método, ruta exacta]]
- *   roles:    (opcional) roles permitidos para esa regla; sin `roles` basta un token válido.
  */
 function crearTablaRutas(urls) {
   return [
@@ -87,7 +84,8 @@ function crearApp({ secreto, urls, ahora = () => Date.now(), logger = console })
 
   // RF-19 / RF-20: autenticación y autorización centralizadas, antes de cualquier proxy.
   app.use((req, res, next) => {
-    for (const cabecera of CABECERAS_IDENTIDAD) delete req.headers[cabecera];
+    // RF-21: se borra primero, también en rutas públicas.
+    eliminarCabecerasDeIdentidad(req.headers);
 
     const ruta = normalizar(req.path);
     const regla = rutas.find((r) => coincidePrefijo(ruta, r.prefijo));
@@ -106,14 +104,16 @@ function crearApp({ secreto, urls, ahora = () => Date.now(), logger = console })
     }
 
     const { sub, role } = resultado.payload;
-    if (regla.roles && !regla.roles.includes(role)) {
-      return respuestaError(res, 403, "Forbidden", "No tiene permisos para este recurso", req);
+
+    // RF-22 a RF-25: token válido pero sin permiso -> 403 (no 401).
+    const decision = autorizar({ role, sub, metodo: req.method, ruta });
+    if (!decision.permitido) {
+      logger.warn?.(`[Gateway] 403 ${req.method} ${ruta}: rol=${role} sub=${sub}`);
+      return respuestaError(res, 403, "Forbidden", MENSAJE_PROHIBIDO, req);
     }
 
-    // Nunca se confía en identidad enviada por el cliente: se sobrescribe con la del token.
-    req.headers["x-user-id"] = sub;
-    req.headers["x-user-role"] = role;
-    req.headers.sub = sub;
+    // RF-21: la identidad que ven los servicios es la del token, nunca la del cliente.
+    propagarIdentidad(req.headers, { sub, role });
     next();
   });
 

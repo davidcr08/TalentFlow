@@ -52,19 +52,31 @@ Se evaluaron dos familias: un **enrutador declarativo** (Nginx, Traefik) y un **
 
 Ninguna de las tres es natural en un enrutador declarativo. Traefik aparecerá recién en el Reto 11, como balanceador de carga delante de este mismo Gateway.
 
-### Autenticación y autorización en el Gateway (RF-19 / RF-20)
+### Autenticación y autorización en el Gateway (RF-19 a RF-25)
 
-La validación del JWT de acceso vive **solo** en el Gateway (`microservicios/api-gateway/jwt.js`, una única implementación); los servicios
-internos no la repiten porque ninguno publica puertos al host. Las rutas públicas son `GET /health`, `POST /auth/login`,
-`POST /auth/recover-password` y `POST /auth/reset-password`; **todo lo demás que se enruta** (`/empleados/*`, `/departamentos/*`,
-`/perfiles/*`, `/notificaciones/*`, `/vacaciones/*`, `POST /auth/change-password`) exige `Authorization: Bearer <jwt>`.
+La validación del JWT de acceso y la autorización por rol viven **solo** en el Gateway (`microservicios/api-gateway`: `jwt.js`,
+`autorizacion.js`, `identidad.js`); los servicios internos no las repiten porque ninguno publica puertos al host. Las rutas públicas son
+`GET /health`, `POST /auth/login`, `POST /auth/recover-password` y `POST /auth/reset-password`; **todo lo demás que se enruta**
+(`/empleados/*`, `/departamentos/*`, `/perfiles/*`, `/notificaciones/*`, `/vacaciones/*`, `POST /auth/change-password`) exige
+`Authorization: Bearer <jwt>`.
 
-Responde `401` (`{"error":"Unauthorized","message","path"}`) si el token falta, está mal formado, tiene la firma inválida o alterado,
-está expirado, no trae el claim `role` o trae el claim `type` (p. ej. un token de reset de contraseña). Si es válido, el Gateway **descarta**
-cualquier `x-user-id` / `x-user-role` / `sub` que envíe el cliente y reenvía la identidad del token como `x-user-id`, `x-user-role` y `sub`
-(esta última la usa `change-password`). La tabla de rutas (`crearTablaRutas` en `app.js`) es el único lugar donde se decide qué es público y
-qué roles pueden usar cada prefijo (`roles`); hoy basta un token válido, sin restricción por rol. Sin `JWT_SECRET` (mínimo 32 caracteres) el
-Gateway no arranca. Pruebas: `npm test --workspace=api-gateway`.
+**401** (`{"error":"Unauthorized","message","path"}`) si el token falta, está mal formado, tiene la firma inválida o alterado, está expirado,
+no trae el claim `role` o trae el claim `type` (p. ej. un token de reset).
+
+**Identidad (RF-21).** El Gateway borra de toda petición (también de las rutas públicas) cualquier `X-User-Id`, `X-User-Role` o `sub` enviado
+por el cliente y, si el token es válido, reenvía `X-User-Id` = claim `sub` y `X-User-Role` = claim `role` (nombres en constantes en
+`identidad.js`). `change-password` usa `X-User-Id`: siempre cambia la contraseña de la cuenta del token.
+
+**Autorización (RF-22 a RF-25), en este orden; si ninguna permite, 403 (nunca 401):**
+
+| # | Regla | Resultado |
+|---|---|---|
+| 1 | Rol `ADMIN` (acceso total: `DELETE /empleados/{id}`, `POST /departamentos`, `POST /vacaciones`…) | permite |
+| 2 | Rol `USER` con método de lectura (`GET`) | permite |
+| 3 | Rol `USER` dueño del recurso: `POST /auth/change-password` (siempre la propia cuenta) o `PUT /perfiles/{empleadoId}` con `empleadoId == sub` | permite |
+| 4 | Cualquier otro caso (un `USER` que escribe, `PUT /perfiles/{otro id}`, un rol desconocido…) | **403** |
+
+Sin `JWT_SECRET` (mínimo 32 caracteres) el Gateway no arranca. Pruebas: `npm test --workspace=api-gateway`.
 
 > Los scripts y colecciones de los Retos 3 y 4 (`docs/reto-03`, `docs/reto-04`) llaman a rutas que ahora están protegidas: para usarlos, obtenga
 > un token con `POST /auth/login` y añada `-H "Authorization: Bearer $TOKEN"` (en Bruno, la cabecera `Authorization`).
