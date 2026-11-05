@@ -109,6 +109,29 @@ class VacacionesRepository:
         )
         return await cur.fetchone()
 
+    async def ids_a_iniciar(self, conn: AsyncConnection, hoy: date) -> list[str]:
+        """RF-27: períodos PROGRAMADA cuya fechaInicio ya llegó."""
+        cur = await conn.execute(
+            "SELECT id FROM vacaciones WHERE estado = 'PROGRAMADA' AND fecha_inicio <= %s "
+            "ORDER BY fecha_inicio, id",
+            (hoy,),
+        )
+        return [f["id"] for f in await cur.fetchall()]
+
+    async def ids_a_finalizar(self, conn: AsyncConnection, hoy: date) -> list[str]:
+        """RF-28: períodos EN_CURSO cuya fechaFin ya pasó (el día fechaFin todavía es de vacaciones)."""
+        cur = await conn.execute(
+            "SELECT id FROM vacaciones WHERE estado = 'EN_CURSO' AND fecha_fin < %s ORDER BY fecha_fin, id",
+            (hoy,),
+        )
+        return [f["id"] for f in await cur.fetchall()]
+
+    async def marcar_estado(self, conn: AsyncConnection, id_: str, estado: str) -> dict[str, Any]:
+        cur = await conn.execute(
+            "UPDATE vacaciones SET estado = %s WHERE id = %s RETURNING *", (estado, id_)
+        )
+        return await cur.fetchone()
+
     # ---------- réplica de empleados ----------
 
     async def obtener_empleado(

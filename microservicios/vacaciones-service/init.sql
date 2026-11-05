@@ -2,8 +2,8 @@
 -- Motor: PostgreSQL (ver docker-compose.yml -> database-vacaciones)
 
 -- Períodos de vacaciones. Estados: PROGRAMADA -> EN_CURSO -> FINALIZADA, o CANCELADA.
--- (En el Reto 4 solo se llega a PROGRAMADA o CANCELADA; las transiciones por fecha
--- las hará el scheduler del Reto 5.)
+-- PROGRAMADA -> EN_CURSO (fecha_inicio <= hoy) y EN_CURSO -> FINALIZADA (fecha_fin < hoy) las hace
+-- la tarea periódica del servicio (RF-27 / RF-28).
 CREATE TABLE IF NOT EXISTS vacaciones (
     id              VARCHAR(20)  PRIMARY KEY,
     empleado_id     VARCHAR(20)  NOT NULL,

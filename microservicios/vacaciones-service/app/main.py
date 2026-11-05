@@ -19,12 +19,15 @@ from .config import Settings
 from .consumidores import COLA, EVENTOS_CONSUMIDOS, ConsumidorEmpleados
 from .errores import AppError
 from .repository import VacacionesRepository, crear_pool
+from .scheduler import PlanificadorVacaciones
+from .dominio import FINALIZAR, INICIAR
 from .servicio import VacacionesService
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("vacaciones")
 
 NOMBRE_SERVICIO = "vacaciones-service"
+TAG_DESARROLLO = "Desarrollo (no usar en producción)"
 FRASES_ESTADO = {
     400: "Bad Request",
     404: "Not Found",
@@ -49,7 +52,9 @@ class PeriodoVacaciones(BaseModel):
     fechaFin: date = Field(examples=["2027-03-30"])
     estado: str = Field(
         description="PROGRAMADA → EN_CURSO → FINALIZADA, o CANCELADA. "
-        "En el Reto 4 solo se llega a PROGRAMADA o CANCELADA.",
+        "Una tarea periódica mueve los períodos por fecha: PROGRAMADA pasa a EN_CURSO cuando "
+        "`fechaInicio <= hoy`, y EN_CURSO pasa a FINALIZADA cuando `fechaFin < hoy` "
+        "(el día `fechaFin` todavía es de vacaciones).",
         examples=["PROGRAMADA"],
     )
     fechaCreacion: str = Field(examples=["2026-10-10T10:00:00Z"])
@@ -133,6 +138,7 @@ def create_app(
     *,
     broker: Optional[Broker] = None,
     arrancar_consumidores: bool = True,
+    arrancar_scheduler: bool = True,
     reloj=None,
 ) -> FastAPI:
     settings = settings or Settings.desde_entorno()
@@ -141,6 +147,7 @@ def create_app(
     broker = broker or RabbitBroker(settings.broker_url, settings.broker_exchange, NOMBRE_SERVICIO)
     servicio = VacacionesService(repo, broker, settings.zona_horaria, reloj)
     consumidor = ConsumidorEmpleados(repo)
+    planificador = PlanificadorVacaciones(servicio, settings.scheduler_intervalo_s)
 
     async def _arrancar_broker() -> None:
         # Segundo plano: la API responde aunque el broker aún no esté listo.
@@ -159,10 +166,15 @@ def create_app(
         tarea = None
         if hasattr(broker, "conectar"):
             tarea = asyncio.create_task(_arrancar_broker())
+        if arrancar_scheduler:
+            planificador.iniciar()
+        if settings.endpoints_desarrollo:
+            log.warning("ENDPOINTS DE DESARROLLO HABILITADOS (forzar-inicio / forzar-fin): no usar en producción")
         log.info("vacaciones-service listo en el puerto %s", settings.port)
         try:
             yield
         finally:
+            await planificador.detener()
             if tarea:
                 tarea.cancel()
             if hasattr(broker, "cerrar"):
@@ -174,7 +186,8 @@ def create_app(
         version="1.0.0",
         description=(
             "Programa y consulta períodos de vacaciones. Publica `vacaciones.programadas` "
-            "y mantiene una réplica local de empleados consumiendo `empleado.creado` y "
+            "y, con una tarea periódica, `vacaciones.iniciadas` y `vacaciones.finalizadas`; "
+            "mantiene una réplica local de empleados consumiendo `empleado.creado` y "
             "`empleado.retirado` (ver Catálogo de Eventos).\n\n"
             "Todos los errores de validación responden **400**."
         ),
@@ -188,6 +201,7 @@ def create_app(
     app.state.servicio = servicio
     app.state.repo = repo
     app.state.broker = broker
+    app.state.planificador = planificador
     _instalar_manejadores_error(app)
 
     errores_doc = {400: {"model": ErrorRespuesta}, 404: {"model": ErrorRespuesta}}
@@ -266,6 +280,44 @@ def create_app(
     )
     async def cancelar(id: str):
         return await servicio.cancelar(id)
+
+    # ---------------------------------------------------------------- RF-30: endpoints de desarrollo
+    # Solo existen si ENDPOINTS_DESARROLLO_HABILITADOS=true (por defecto NO). Sin la variable la ruta
+    # no se registra: responde 404 y no aparece en Swagger. "Solo ADMIN" lo aplica el Gateway
+    # (cualquier POST de un USER recibe 403, RF-22/RF-23); el servicio no repite esa validación.
+    if settings.endpoints_desarrollo:
+        aviso = (
+            "**ENDPOINT DE DESARROLLO — no usar en producción.** Solo ADMIN (lo exige el Gateway) y solo "
+            "disponible con `ENDPOINTS_DESARROLLO_HABILITADOS=true`. Usa la misma función de transición que "
+            "la tarea periódica, pero **ignora las fechas**, para probar sin esperar."
+        )
+        extra_dev = {"x-desarrollo": True}
+
+        @app.post(
+            "/vacaciones/{id}/forzar-inicio",
+            response_model=PeriodoVacaciones,
+            tags=[TAG_DESARROLLO],
+            summary="[DESARROLLO] Fuerza PROGRAMADA → EN_CURSO",
+            description=aviso + "\n\nPublica `vacaciones.iniciadas`. **409** si el período no está PROGRAMADA; "
+            "**503** si no se pudo publicar (el período no cambia).",
+            responses={404: {"model": ErrorRespuesta}, 409: {"model": ErrorRespuesta}, 503: {"model": ErrorRespuesta}},
+            openapi_extra=extra_dev,
+        )
+        async def forzar_inicio(id: str):
+            return await servicio.transicionar(id, INICIAR, forzar=True)
+
+        @app.post(
+            "/vacaciones/{id}/forzar-fin",
+            response_model=PeriodoVacaciones,
+            tags=[TAG_DESARROLLO],
+            summary="[DESARROLLO] Fuerza EN_CURSO → FINALIZADA",
+            description=aviso + "\n\nPublica `vacaciones.finalizadas`. **409** si el período no está EN_CURSO; "
+            "**503** si no se pudo publicar (el período no cambia).",
+            responses={404: {"model": ErrorRespuesta}, 409: {"model": ErrorRespuesta}, 503: {"model": ErrorRespuesta}},
+            openapi_extra=extra_dev,
+        )
+        async def forzar_fin(id: str):
+            return await servicio.transicionar(id, FINALIZAR, forzar=True)
 
     _limpiar_openapi(app)
     return app

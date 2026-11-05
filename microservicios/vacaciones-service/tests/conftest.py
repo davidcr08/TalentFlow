@@ -49,14 +49,14 @@ def pg_uri():
         servidor.cleanup()
 
 
-@pytest.fixture
-def entorno(pg_uri):
+def _crear_entorno(pg_uri, **ajustes):
     broker, reloj = BrokerFalso(), Reloj()
     settings = Settings(
         port=8085, db_host="", db_port=0, db_name="", db_user="", db_pass="",
-        broker_url="", broker_exchange="x", zona_horaria="America/Bogota", dsn_url=pg_uri,
+        broker_url="", broker_exchange="x", zona_horaria="America/Bogota", dsn_url=pg_uri, **ajustes,
     )
-    app = create_app(settings, broker=broker, arrancar_consumidores=False, reloj=reloj)
+    # El scheduler real no se arranca en las pruebas: se invoca a mano (determinista, sin esperas).
+    app = create_app(settings, broker=broker, arrancar_consumidores=False, arrancar_scheduler=False, reloj=reloj)
     with TestClient(app) as client:
         # Limpieza entre pruebas
         async def limpiar():
@@ -66,3 +66,14 @@ def entorno(pg_uri):
                 )
         client.portal.call(limpiar)
         yield client, app, broker, reloj
+
+
+@pytest.fixture
+def entorno(pg_uri):
+    yield from _crear_entorno(pg_uri)
+
+
+@pytest.fixture
+def entorno_dev(pg_uri):
+    """Con los endpoints de desarrollo habilitados (RF-30)."""
+    yield from _crear_entorno(pg_uri, endpoints_desarrollo=True)

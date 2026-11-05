@@ -334,6 +334,10 @@ services:
       BROKER_URL: amqp://${RABBITMQ_USER:-talentflow}:${RABBITMQ_PASS:-talentflow_dev}@message-broker:5672/
       BROKER_EXCHANGE: talentflow.events
       TZ_NEGOCIO: America/Bogota
+      # RF-29: cada cuántos segundos la tarea mueve los períodos por fecha (0 = desactivada).
+      SCHEDULER_INTERVALO_SEGUNDOS: ${SCHEDULER_INTERVALO_SEGUNDOS:-60}
+      # RF-30: habilita POST /vacaciones/{id}/forzar-inicio y /forzar-fin. SOLO desarrollo/pruebas.
+      ENDPOINTS_DESARROLLO_HABILITADOS: ${ENDPOINTS_DESARROLLO_HABILITADOS:-false}
     depends_on:
       database-vacaciones:
         condition: service_healthy

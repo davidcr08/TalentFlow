@@ -27,8 +27,8 @@ Documento vivo. La fuente de verdad de nombres, productores, consumidores y carg
 | `cuenta.activada` | empleados-service ✅ | notificaciones (RF-17) | 5 |
 | `usuario.recuperacion` | empleados-service ✅ | notificaciones (RF-16) | 5 |
 | `cuenta.desactivada` | empleados-service ✅ | notificaciones (RF-17) | 5 |
-| `vacaciones.iniciadas` | **vacaciones-service** ⚠️ _aún no lo publica_ | empleados (`empleados-service.q`) | 5 |
-| `vacaciones.finalizadas` | **vacaciones-service** ⚠️ _aún no lo publica_ | empleados (`empleados-service.q`) | 5 |
+| `vacaciones.iniciadas` | **vacaciones-service** ✅ (RF-27) | empleados (`empleados-service.q`) | 5 |
+| `vacaciones.finalizadas` | **vacaciones-service** ✅ (RF-28) | empleados (`empleados-service.q`) | 5 |
 
 Reacciones: ver README raíz, sección *Reto 4*.
 
@@ -100,8 +100,7 @@ Sin `empleadoId` y `email` los consumidores rechazan el mensaje como inválido.
   transacción. Si el broker rechaza la publicación se hace `ROLLBACK` y el mensaje se reintenta, de modo que el token de activación
   no se pierde en silencio. Contrapartida: si el `COMMIT` falla justo después de publicar, el reintento publica de nuevo
   (al menos una vez; los consumidores deduplican por `id`).
-- **Pendiente (fuera de este alcance)**: `vacaciones-service` todavía no publica `vacaciones.iniciadas` ni `vacaciones.finalizadas`
-  (el scheduler del Reto 5), y `notificaciones-service` aún no consume `usuario.creado` (la bienvenida sigue colgada de `empleado.creado`).
+- `vacaciones.iniciadas` y `vacaciones.finalizadas` los publica la tarea periódica de `vacaciones-service` (ver más abajo, RF-27 a RF-30).
 
 ### Notificaciones (Reto 5, RF-16 a RF-18)
 
@@ -122,3 +121,45 @@ Sin `empleadoId` y `email` los consumidores rechazan el mensaje como inválido.
   transacción y la unicidad en BD es `(evento_id, tipo)`.
 - `DESVINCULACION` ya no se genera; se conserva en el `CHECK` y en el enum solo para leer las filas del Reto 4.
 - En volúmenes ya creados `init.sql` no se reejecuta: aplique a mano el bloque `ALTER TABLE notificaciones …` o use `docker compose down -v`.
+
+### Scheduler de vacaciones (Reto 5, RF-27 a RF-30)
+
+`vacaciones-service` ejecuta una tarea periódica (`app/scheduler.py`) que llama a `VacacionesService.ejecutar_transiciones()`:
+
+| Paso | Busca | Hace | Publica (`data`) |
+|---|---|---|---|
+| 1 (RF-27) | `PROGRAMADA` con `fechaInicio <= hoy` | → `EN_CURSO` | `vacaciones.iniciadas`: `vacacionesId, empleadoId, email, fechaInicio, fechaFin` |
+| 2 (RF-28) | `EN_CURSO` con `fechaFin < hoy` | → `FINALIZADA` | `vacaciones.finalizadas`: `vacacionesId, empleadoId, email, fechaFin` |
+
+- Las vacaciones **incluyen** el día `fechaFin`: el último día sigue `EN_CURSO` y se cierra al día siguiente. "Hoy" es la fecha en `TZ_NEGOCIO`
+  (`America/Bogota`), no la UTC.
+- El orden es siempre iniciar y luego finalizar: un período con las fechas ya pasadas por completo (p. ej. el servicio estuvo caído) sale en
+  la misma pasada con `iniciadas` y después `finalizadas`, así la cuenta se suspende y se reactiva en ese orden.
+- **Frecuencia (RF-29)**: `SCHEDULER_INTERVALO_SEGUNDOS` (por defecto `60`; `0` la desactiva). Primera pasada al arrancar.
+- **No se pierde ningún evento**: cada transición bloquea la fila, publica y recién entonces confirma. Si el broker falla se revierte y el
+  período conserva su estado, así que la siguiente pasada lo reintenta. Si el `COMMIT` fallara justo después de publicar, el reintento
+  republica con otro `id`; `empleados-service` lo tolera porque decide por el estado de la cuenta (RF-10 / RF-11 / RF-13).
+- Dos pasadas simultáneas (o dos instancias) no duplican: la segunda ve el estado ya cambiado.
+- Un período que falla (p. ej. sin réplica del empleado) no impide procesar los demás.
+
+**Estrategia de prueba (RF-30)** — para no esperar a las fechas reales:
+
+| Endpoint | Efecto | Errores |
+|---|---|---|
+| `POST /vacaciones/{id}/forzar-inicio` | `PROGRAMADA` → `EN_CURSO` + `vacaciones.iniciadas`, **ignorando las fechas** | 404 no existe · 409 no está `PROGRAMADA` · 503 no se pudo publicar |
+| `POST /vacaciones/{id}/forzar-fin` | `EN_CURSO` → `FINALIZADA` + `vacaciones.finalizadas`, **ignorando las fechas** | 404 · 409 no está `EN_CURSO` · 503 |
+
+- Solo existen con `ENDPOINTS_DESARROLLO_HABILITADOS=true` (por defecto `false`: la ruta responde 404 y ni aparece en Swagger). Al estar
+  habilitados salen en Swagger con la etiqueta *Desarrollo (no usar en producción)* y el prefijo `[DESARROLLO]`.
+- **Solo ADMIN**: lo aplica el Gateway (cualquier `POST` de un `USER` recibe 403); el servicio no repite esa validación.
+- Reutilizan `VacacionesService.transicionar()`, la misma función que usa el scheduler (con `forzar=True`).
+- Prueba de punta a punta sin esperar fechas:
+
+```bash
+# habilitar: ENDPOINTS_DESARROLLO_HABILITADOS=true en .env, luego `docker compose up -d --build vacaciones-service`
+TOKEN=$(curl -s -X POST localhost:8080/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"<admin>","password":"<clave>"}' | jq -r .token)   # el nombre del campo puede variar: ver la respuesta
+curl -X POST localhost:8080/vacaciones/V-2026-0001/forzar-inicio -H "Authorization: Bearer $TOKEN"   # cuenta -> SUSPENDIDA_TEMPORAL
+curl -X POST localhost:8080/vacaciones/V-2026-0001/forzar-fin    -H "Authorization: Bearer $TOKEN"   # cuenta -> ACTIVA
+```
+

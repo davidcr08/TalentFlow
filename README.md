@@ -56,7 +56,8 @@ Ninguna de las tres es natural en un enrutador declarativo. Traefik aparecerá r
 
 La validación del JWT de acceso y la autorización por rol viven **solo** en el Gateway (`microservicios/api-gateway`: `jwt.js`,
 `autorizacion.js`, `identidad.js`); los servicios internos no las repiten porque ninguno publica puertos al host. Las rutas públicas son
-`GET /health`, `POST /auth/login`, `POST /auth/recover-password` y `POST /auth/reset-password`; **todo lo demás que se enruta**
+`GET /health`, la documentación Swagger (`GET`, RF-26), `POST /auth/login`, `POST /auth/recover-password` y `POST /auth/reset-password`;
+**todo lo demás que se enruta**
 (`/empleados/*`, `/departamentos/*`, `/perfiles/*`, `/notificaciones/*`, `/vacaciones/*`, `POST /auth/change-password`) exige
 `Authorization: Bearer <jwt>`.
 
@@ -123,7 +124,7 @@ Los tres servicios entran **detrás del Gateway** (`expose`, nunca `ports`): `/p
 | **notificaciones-service** | **Java (Spring Boot)** | 8084 | PostgreSQL | solo consume eventos |
 | **vacaciones-service** | **Python (FastAPI)** | 8085 | PostgreSQL | REST + produce eventos |
 
-5 lenguajes distintos (el reto pide ≥ 4). Elección: Python para vacaciones (aritmética de fechas, y el scheduler del Reto 5);
+5 lenguajes distintos (el reto pide ≥ 4). Elección: Python para vacaciones (aritmética de fechas, y el scheduler del Reto 5, ya implementado);
 Go para perfiles (servicio ligero de eventos + REST); Java/Spring para notificaciones (`@RabbitListener` y JDBC maduros).
 
 ### Broker: por qué RabbitMQ
@@ -171,7 +172,7 @@ Reglas: 4 validaciones → `400` (fechas incoherentes, pasadas, solapamiento —
 
 | RNF | Garantía | Dónde se cumple |
 |---|---|---|
-| RNF-03 | **Vacaciones no conoce cuentas ni autenticación**: no maneja usuarios, tokens ni sesiones; solo valida el período y publica `vacaciones.programadas`. La desactivación de cuentas (Reto 5) la hará otro servicio al consumir el evento. | `vacaciones-service` (no hay código ni tablas de cuentas) |
+| RNF-03 | **Vacaciones no conoce cuentas ni autenticación**: no maneja usuarios, tokens ni sesiones; solo valida el período, mueve los períodos por fecha (RF-27/RF-28) y publica `vacaciones.programadas`, `vacaciones.iniciadas` y `vacaciones.finalizadas`. La desactivación de cuentas (Reto 5) la hará otro servicio al consumir el evento. | `vacaciones-service` (no hay código ni tablas de cuentas) |
 | RNF-04 | **Idempotencia por `id` del envelope**: cada consumidor guarda el id en `eventos_procesados(id, procesado_en)`. Una reentrega no inserta (`ON CONFLICT DO NOTHING`) y se confirma sin repetir el efecto. | notificaciones, perfiles y vacaciones (opción b) |
 | RNF-05 | **El ack se envía solo después de procesar**, y el efecto + el registro del id van en la **misma transacción** de BD: si el efecto falla, el id también se deshace y el broker reentrega. | `ProcesadorEventos` (Java), `Store.ProcesarEvento` (Go), `ConsumidorEmpleados.manejar` (Python) |
 | RNF-06 | **La publicación ocurre después del commit.** Si publicar falla, se registra el error y **no se revierte la BD** (el período / empleado queda guardado). | `VacacionesService.programar` (Python), `empleados.service.js` (Node) |
@@ -198,6 +199,8 @@ Política de confirmación (igual en los tres consumidores): procesado, duplicad
 ### Swagger UI (a través del Gateway, sin agregar rutas)
 
 - <http://localhost:8080/perfiles/docs> · <http://localhost:8080/notificaciones/docs> · <http://localhost:8080/vacaciones/docs>
+- **RF-26**: estas rutas de documentación son **públicas** (solo `GET`, sin token): `/perfiles/docs` y `/perfiles/openapi.json`,
+  `/notificaciones/docs` y `/notificaciones/api-docs` (+ lo que cuelga de ellas) y `/vacaciones/docs` y `/vacaciones/openapi.json`.
 
 ### Probar el flujo
 

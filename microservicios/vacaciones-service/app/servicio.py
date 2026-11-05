@@ -5,7 +5,15 @@ from typing import Any, Callable, Optional
 from zoneinfo import ZoneInfo
 
 from .broker import Broker
-from .dominio import dias_habiles, periodo_a_dto
+from .dominio import (
+    FINALIZAR,
+    INICIAR,
+    TRANSICIONES,
+    corresponde_por_fecha,
+    data_evento_transicion,
+    dias_habiles,
+    periodo_a_dto,
+)
 from .errores import AppError
 from .repository import VacacionesRepository
 
@@ -135,3 +143,86 @@ class VacacionesService:
                 )
             fila = await self.repo.marcar_cancelada(conn, id_)
         return periodo_a_dto(fila)
+
+    # ------------------------------------------------------------------ RF-27 / RF-28 / RF-30
+
+    async def transicionar(self, id_: str, accion: str, *, forzar: bool = False) -> Optional[dict[str, Any]]:
+        """ÚNICA función de transición de estado por fecha. La usan:
+          - el scheduler (forzar=False): solo transiciona si la fecha ya lo habilita;
+          - los endpoints de desarrollo (forzar=True): ignora las fechas (RF-30).
+
+        PROGRAMADA -> EN_CURSO + vacaciones.iniciadas   (accion = "iniciar")
+        EN_CURSO  -> FINALIZADA + vacaciones.finalizadas (accion = "finalizar")
+
+        Sin forzar devuelve None si no hay nada que hacer (otro ciclo o instancia ya lo movió, o la
+        fecha aún no corresponde). Con forzar lanza 404 si no existe y 409 si el estado no es el esperado.
+
+        La publicación ocurre DENTRO de la transacción, con la fila bloqueada, y ANTES del commit: si
+        el broker falla se revierte y el período conserva su estado, así que el siguiente ciclo
+        reintenta (no se pierde el evento y el estado no queda sin publicar). Si es el commit el que
+        falla tras publicar, el siguiente ciclo republica con otro id; los consumidores lo toleran
+        porque deciden por el estado de la cuenta (RF-10/RF-11), no por el id del evento.
+        """
+        regla = TRANSICIONES[accion]
+        hoy = self.hoy()
+        async with self.repo.transaccion() as conn:
+            fila = await self.repo.obtener(conn, id_, para_actualizar=True)
+            if fila is None:
+                if forzar:
+                    raise AppError(f"No existe el período de vacaciones {id_}", 404)
+                return None
+            if fila["estado"] != regla["desde"]:
+                if forzar:
+                    raise AppError(
+                        f"El período {id_} está {fila['estado']}: solo se puede {accion} un período {regla['desde']}",
+                        409,
+                    )
+                return None
+            if not forzar and not corresponde_por_fecha(accion, fila, hoy):
+                return None
+
+            empleado = await self.repo.obtener_empleado(conn, fila["empleado_id"])
+            if empleado is None:
+                raise AppError(
+                    f"No hay réplica del empleado {fila['empleado_id']}: no se puede publicar {regla['evento']}",
+                    409,
+                )
+
+            try:
+                await self.broker.publicar(regla["evento"], data_evento_transicion(accion, fila, empleado["email"]))
+            except Exception as exc:  # noqa: BLE001
+                log.exception("No se pudo publicar %s del período %s; el período conserva su estado", regla["evento"], id_)
+                raise AppError(
+                    f"No se pudo publicar {regla['evento']}: el período {id_} no cambió de estado", 503
+                ) from exc
+
+            fila = await self.repo.marcar_estado(conn, id_, regla["hacia"])
+        log.info(
+            "Período %s: %s -> %s (%s)%s",
+            id_, regla["desde"], regla["hacia"], regla["evento"], " [forzado]" if forzar else "",
+        )
+        return periodo_a_dto(fila)
+
+    async def ejecutar_transiciones(self) -> dict[str, list[str]]:
+        """Una pasada de la tarea periódica (RF-27 y RF-28).
+
+        Primero inicia y después finaliza: un período cuyas fechas ya pasaron por completo (p. ej.
+        porque el servicio estuvo caído) sale en la misma pasada con vacaciones.iniciadas y luego
+        vacaciones.finalizadas, en ese orden. Un fallo en un período no impide procesar los demás.
+        """
+        resultado: dict[str, list[str]] = {"iniciados": [], "finalizados": []}
+        for accion, clave in ((INICIAR, "iniciados"), (FINALIZAR, "finalizados")):
+            hoy = self.hoy()
+            async with self.repo.transaccion() as conn:
+                ids = (
+                    await self.repo.ids_a_iniciar(conn, hoy)
+                    if accion == INICIAR
+                    else await self.repo.ids_a_finalizar(conn, hoy)
+                )
+            for id_ in ids:
+                try:
+                    if await self.transicionar(id_, accion):
+                        resultado[clave].append(id_)
+                except Exception:  # noqa: BLE001
+                    log.exception("Fallo al %s el período %s; se reintenta en la próxima pasada", accion, id_)
+        return resultado

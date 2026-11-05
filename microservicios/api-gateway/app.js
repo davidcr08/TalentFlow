@@ -10,9 +10,12 @@ const TIMEOUT_HEALTH_MS = 2000;
  * Tabla de rutas: dónde se enruta cada prefijo y qué rutas son públicas (RF-19 / RF-20). Todo lo
  * que NO figura como público exige un JWT de acceso válido y pasa por la autorización por rol
  * (RF-22 a RF-25, autorizacion.js).
- *   publicas: [[método, ruta exacta]]
+ *   publicas: [[método, ruta exacta]] (o "ruta/*" para todo lo que cuelga de ella)
  */
 function crearTablaRutas(urls) {
+  // RF-26: la documentación Swagger de cada servicio (siempre bajo su prefijo, ver sus README) es pública,
+  // solo lectura. Un "/*" final significa "esa ruta y todo lo que cuelga de ella" (recursos de Swagger UI).
+  const swagger = (prefijo, rutas) => rutas.map((ruta) => ["GET", `${prefijo}${ruta}`]);
   return [
     { prefijo: "/empleados", destino: urls.empleados },
     {
@@ -25,9 +28,21 @@ function crearTablaRutas(urls) {
       ]
     },
     { prefijo: "/departamentos", destino: urls.departamentos },
-    { prefijo: "/perfiles", destino: urls.perfiles },
-    { prefijo: "/notificaciones", destino: urls.notificaciones },
-    { prefijo: "/vacaciones", destino: urls.vacaciones }
+    {
+      prefijo: "/perfiles",
+      destino: urls.perfiles,
+      publicas: swagger("/perfiles", ["/docs", "/openapi.json"])
+    },
+    {
+      prefijo: "/notificaciones",
+      destino: urls.notificaciones,
+      publicas: swagger("/notificaciones", ["/docs", "/docs/*", "/api-docs", "/api-docs/*"])
+    },
+    {
+      prefijo: "/vacaciones",
+      destino: urls.vacaciones,
+      publicas: swagger("/vacaciones", ["/docs", "/docs/*", "/openapi.json"])
+    }
   ];
 }
 
@@ -36,7 +51,10 @@ const coincidePrefijo = (ruta, prefijo) => ruta === prefijo || ruta.startsWith(`
 const normalizar = (ruta) => (ruta.length > 1 && ruta.endsWith("/") ? ruta.slice(0, -1) : ruta);
 
 function esPublica(regla, metodo, ruta) {
-  return (regla.publicas ?? []).some(([m, r]) => m === metodo && r === ruta);
+  return (regla.publicas ?? []).some(([m, r]) => {
+    if (m !== metodo) return false;
+    return r.endsWith("/*") ? ruta.startsWith(r.slice(0, -1)) : r === ruta;
+  });
 }
 
 function respuestaError(res, status, error, message, req) {

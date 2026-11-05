@@ -223,6 +223,76 @@ describe("RF-19 / RF-20: el Gateway protege los endpoints y propaga la identidad
     });
   }
 
+  describe("RF-26: rutas públicas (Swagger) y rutas protegidas", () => {
+    const swagger = [
+      "/perfiles/docs",
+      "/perfiles/openapi.json",
+      "/notificaciones/docs",
+      "/notificaciones/docs/index.html",
+      "/notificaciones/api-docs",
+      "/notificaciones/api-docs/swagger-config",
+      "/vacaciones/docs",
+      "/vacaciones/docs/oauth2-redirect",
+      "/vacaciones/openapi.json"
+    ];
+    for (const ruta of swagger) {
+      it(`GET ${ruta} es público: llega al servicio sin token`, async () => {
+        ultima = undefined;
+        const r = await llamar("GET", ruta);
+        assert.equal(r.status, 200);
+        assert.equal(ultima.url, ruta);
+        assert.equal(ultima.headers["x-user-id"], undefined);
+      });
+    }
+
+    it("la documentación pública no abre otras rutas parecidas ni otros métodos", async () => {
+      for (const [metodo, ruta] of [
+        ["POST", "/vacaciones/docs"],
+        ["DELETE", "/perfiles/docs"],
+        ["GET", "/vacaciones/docsX"],
+        ["GET", "/vacaciones/documentos"],
+        ["GET", "/notificaciones/api-docsX"],
+        ["GET", "/notificaciones/E001"],
+        ["GET", "/perfiles/E001"],
+        ["GET", "/empleados/docs"],
+        ["GET", "/departamentos/docs"],
+        ["GET", "/empleados/openapi.json"]
+      ]) {
+        ultima = undefined;
+        const r = await llamar(metodo, ruta);
+        assert.equal(r.status, 401, `${metodo} ${ruta}`);
+        assert.equal(ultima, undefined);
+      }
+    });
+
+    it("la documentación pública tampoco deja pasar cabeceras de identidad falsas", async () => {
+      await llamar("GET", "/vacaciones/docs", { headers: { "X-User-Id": "ADMIN", "X-User-Role": "ADMIN" } });
+      assert.equal(ultima.headers["x-user-id"], undefined);
+      assert.equal(ultima.headers["x-user-role"], undefined);
+    });
+
+    it("POST /auth/change-password requiere JWT; los tres POST de auth restantes son públicos", async () => {
+      assert.equal((await llamar("POST", "/auth/change-password")).status, 401);
+      for (const ruta of ["/auth/login", "/auth/recover-password", "/auth/reset-password"]) {
+        assert.equal((await llamar("POST", ruta, { cuerpo: {} })).status, 200);
+      }
+    });
+
+    it("POST /vacaciones/{id}/forzar-inicio y forzar-fin: sin token 401, USER 403, ADMIN pasa (RF-30)", async () => {
+      const admin = { authorization: bearer(token({ sub: "ADMIN", role: "ADMIN" })) };
+      const user = { authorization: bearer(token({ sub: "E001", role: "USER" })) };
+      for (const ruta of ["/vacaciones/V-2026-0001/forzar-inicio", "/vacaciones/V-2026-0001/forzar-fin"]) {
+        assert.equal((await llamar("POST", ruta)).status, 401);
+        ultima = undefined;
+        assert.equal((await llamar("POST", ruta, { headers: user })).status, 403);
+        assert.equal(ultima, undefined);
+        assert.equal((await llamar("POST", ruta, { headers: admin })).status, 200);
+        assert.equal(ultima.url, ruta);
+        assert.equal(ultima.headers["x-user-role"], "ADMIN");
+      }
+    });
+  });
+
   it("GET /health es público y lo atiende el propio Gateway", async () => {
     const r = await llamar("GET", "/health");
     assert.equal(r.status, 200);
