@@ -2,7 +2,7 @@ const amqp = require("amqplib");
 const { EventoInvalido } = require("../errores");
 const { EVENTOS_CONSUMIDOS } = require("../services/cuentas-eventos.service");
 
-const COLA = "empleados-service.q";
+const COLA = "auth-service.q";
 
 const pausa = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 

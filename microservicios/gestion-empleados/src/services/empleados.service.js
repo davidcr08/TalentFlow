@@ -164,40 +164,48 @@ return empleadoGuardado;
 
 
   //Reto 04 
-  
-async function retirar(id, motivo) {
-  const existente = await repositorio.buscarPorId(id);
+ 
+  async function retirar(id, motivo) {
+    const existente = await repositorio.buscarPorId(id);
 
-  if (!existente) {
-    throw new AppError(`El empleado con id ${id} no existe`, 404);
-  }
-
-  if (existente.estado === "RETIRADO") {
-    throw new AppError(`El empleado con id ${id} ya está retirado`, 400);
-  }
-
-  const empleadoRetirado = await repositorio.retirar(id);
-
-  if (!empleadoRetirado) {
-    throw new AppError(`No se pudo retirar el empleado con id ${id}`, 409);
-  }
-
-  if (publicadorEventos) {
-    try {
-      await publicadorEventos.publicar(
-        "empleado.retirado",
-        cargaRetiro(empleadoRetirado, motivo)
-      );
-    } catch (error) {
-      console.error(
-        "No se pudo publicar el evento empleado.retirado:",
-        error.message
-      );
+    if (!existente) {
+      throw new AppError(`El empleado con id ${id} no existe`, 404);
     }
-  }
 
-  return empleadoRetirado;
-}
+    if (existente.estado === "RETIRADO") {
+      throw new AppError(`El empleado con id ${id} ya está retirado`, 400);
+    }
+
+    // Validar motivo: solo string no vacío, máx 255 chars; default "NO_ESPECIFICADO"
+    const motivoFinal = typeof motivo === "string" && motivo.trim() ? motivo.trim() : "NO_ESPECIFICADO";
+    if (motivo !== undefined && (typeof motivo !== "string" || !motivo.trim() || motivo.trim().length > 255)) {
+      throw new AppError("Motivo inválido", 400, [
+        { field: "motivo", message: "Debe ser un texto no vacío de máximo 255 caracteres", rejectedValue: motivo }
+      ]);
+    }
+
+    const empleadoRetirado = await repositorio.retirar(id);
+
+    if (!empleadoRetirado) {
+      throw new AppError(`No se pudo retirar el empleado con id ${id}`, 409);
+    }
+
+    if (publicadorEventos) {
+      try {
+        await publicadorEventos.publicar(
+          "empleado.retirado",
+          cargaRetiro(empleadoRetirado, motivoFinal)
+        );
+      } catch (error) {
+        console.error(
+          "No se pudo publicar el evento empleado.retirado:",
+          error.message
+        );
+      }
+    }
+
+    return empleadoRetirado;
+  }
 
 
   // Se ejecuta cuando departamentos-service se restablece (Circuit Breaker -> CLOSED).

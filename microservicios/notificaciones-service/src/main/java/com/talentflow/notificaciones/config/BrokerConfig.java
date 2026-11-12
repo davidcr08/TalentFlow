@@ -1,13 +1,20 @@
 package com.talentflow.notificaciones.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.amqp.core.AmqpAdmin;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
+import org.springframework.amqp.rabbit.core.RabbitAdmin;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import jakarta.annotation.PostConstruct;
 
 /**
  * Topología (compartida por todo el ecosistema, ver docs/eventos.md):
@@ -15,7 +22,45 @@ import org.springframework.context.annotation.Configuration;
  * Spring AMQP (RabbitAdmin) la declara automáticamente al conectar.
  */
 @Configuration
-public class BrokerConfig {
+public class BrokerConfig implements ApplicationListener<ApplicationReadyEvent> {
+
+    private static final Logger log = LoggerFactory.getLogger(BrokerConfig.class);
+
+    static {
+        System.err.println("=== BrokerConfig CLASS LOADED (static initializer) ===");
+        log.error("=== BrokerConfig CLASS LOADED (static initializer) ===");
+    }
+
+    private final AmqpAdmin amqpAdmin;
+
+    public BrokerConfig(AmqpAdmin amqpAdmin) {
+        this.amqpAdmin = amqpAdmin;
+        System.err.println("=== BrokerConfig CONSTRUCTOR (System.err) ===");
+        log.error("=== BrokerConfig CONSTRUCTOR (ERROR level) ===");
+    }
+
+    @PostConstruct
+    public void init() {
+        System.err.println("=== BrokerConfig @PostConstruct (System.err) ===");
+        log.error("=== BrokerConfig @PostConstruct ===");
+    }
+
+    @Override
+    public void onApplicationEvent(ApplicationReadyEvent event) {
+        log.error("=== BrokerConfig: ApplicationReadyEvent recibido ===");
+        System.err.println("=== BrokerConfig: ApplicationReadyEvent recibido (System.err) ===");
+        try {
+            if (amqpAdmin instanceof RabbitAdmin rabbitAdmin) {
+                log.error("Invocando RabbitAdmin.afterPropertiesSet()...");
+                rabbitAdmin.afterPropertiesSet();
+                log.error("Declaración de topología RabbitMQ completada");
+            } else {
+                log.error("AmqpAdmin no es RabbitAdmin: {}", amqpAdmin.getClass().getName());
+            }
+        } catch (Exception e) {
+            log.error("Error declarando topología RabbitMQ: {}", e.getMessage(), e);
+        }
+    }
 
     @Bean
     public TopicExchange eventosExchange(@Value("${app.broker.exchange}") String nombre) {

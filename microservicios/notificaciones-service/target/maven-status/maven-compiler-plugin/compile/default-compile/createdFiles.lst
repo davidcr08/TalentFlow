@@ -1,0 +1,17 @@
+com\talentflow\notificaciones\dominio\TipoNotificacion.class
+com\talentflow\notificaciones\web\HealthController.class
+com\talentflow\notificaciones\NotificacionesApplication.class
+com\talentflow\notificaciones\servicio\ProcesadorEventos.class
+com\talentflow\notificaciones\repositorio\NotificacionRepository.class
+com\talentflow\notificaciones\web\ManejadorErrores.class
+com\talentflow\notificaciones\web\NotificacionController.class
+com\talentflow\notificaciones\eventos\EventoInvalidoException.class
+com\talentflow\notificaciones\dominio\NotificacionNueva.class
+com\talentflow\notificaciones\mensajeria\EventoListener.class
+com\talentflow\notificaciones\dominio\Notificacion.class
+com\talentflow\notificaciones\config\OpenApiConfig.class
+com\talentflow\notificaciones\eventos\Envelope.class
+com\talentflow\notificaciones\servicio\ProcesadorEventos$Resultado.class
+com\talentflow\notificaciones\eventos\EventoParser.class
+com\talentflow\notificaciones\config\BrokerConfig.class
+com\talentflow\notificaciones\servicio\ConstructorNotificaciones.class

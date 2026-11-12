@@ -29,6 +29,9 @@ app:
   broker:
     exchange: ${BROKER_EXCHANGE:talentflow.events}
     queue: ${BROKER_QUEUE:notificaciones-service.q}
+  # RF-16: base del enlace que se envía en las notificaciones de SEGURIDAD (se le añade ?token=...).
+  enlaces:
+    reset-password: ${ENLACE_RESET_PASSWORD:http://localhost:8080/auth/reset-password}
 
 # Swagger bajo /notificaciones/* para que sea alcanzable por el Gateway sin agregarle rutas
 # (el Gateway solo enruta el prefijo /notificaciones).

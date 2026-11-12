@@ -43,9 +43,35 @@ function crearRepositorioEmpleadosEnMemoria() {
       return null;
     },
 
-    async listar() {
-      return Array.from(empleados.values());
-    },
+    async listar(estado, desde, hasta) {
+          let resultado = Array.from(empleados.values());
+
+          if (estado) {
+            const estadosValidos = ["ACTIVO", "EN_VACACIONES", "RETIRADO"];
+            if (!estadosValidos.includes(estado)) {
+              const { AppError } = require("../errores");
+              throw new AppError(`El estado "${estado}" no es válido`, 400, [
+                {
+                  field: "estado",
+                  message: "No es un estado válido",
+                  rejectedValue: estado
+                }
+              ]);
+            }
+            resultado = resultado.filter((e) => e.estado === estado);
+          }
+
+          if (desde) {
+            resultado = resultado.filter((e) => e.fechaRetiro && e.fechaRetiro >= desde);
+          }
+
+          if (hasta) {
+            const hastaDate = new Date(`${hasta}T23:59:59.999Z`);
+            resultado = resultado.filter((e) => e.fechaRetiro && new Date(e.fechaRetiro) <= hastaDate);
+          }
+
+          return resultado;
+        },
 
     async listarPendientes() {
       return Array.from(empleados.values()).filter(
