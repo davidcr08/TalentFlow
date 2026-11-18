@@ -10,6 +10,7 @@ H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\tale
 H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\talentflow\notificaciones\NotificacionesApplication.java
 H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\talentflow\notificaciones\repositorio\NotificacionRepository.java
 H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\talentflow\notificaciones\servicio\ConstructorNotificaciones.java
+H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\talentflow\notificaciones\servicio\PendientesReconciliador.java
 H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\talentflow\notificaciones\servicio\ProcesadorEventos.java
 H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\talentflow\notificaciones\web\HealthController.java
 H:\micro\TalentFlow\microservicios\notificaciones-service\src\main\java\com\talentflow\notificaciones\web\ManejadorErrores.java

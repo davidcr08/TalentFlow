@@ -3,6 +3,7 @@ package com.talentflow.notificaciones;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.ComponentScan;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Servicio de Notificaciones (Java + Spring Boot).
@@ -10,6 +11,7 @@ import org.springframework.context.annotation.ComponentScan;
  */
 @SpringBootApplication
 @ComponentScan(basePackages = "com.talentflow.notificaciones")
+@EnableScheduling
 public class NotificacionesApplication {
 
     public static void main(String[] args) {

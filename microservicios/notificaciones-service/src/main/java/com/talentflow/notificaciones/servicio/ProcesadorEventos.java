@@ -29,7 +29,9 @@ public class ProcesadorEventos {
     public enum Resultado {
         PROCESADO, DUPLICADO, IGNORADO,
         /** RF-18: empleado.creado / empleado.retirado solo dejan una traza, sin notificación. */
-        TRAZA
+        TRAZA,
+        /** RF-42: evento vacaciones.finalizadas persistido como pendiente (empleado desconocido). */
+        PENDIENTE
     }
 
     private static final Logger log = LoggerFactory.getLogger(ProcesadorEventos.class);
@@ -50,15 +52,58 @@ public class ProcesadorEventos {
     public Resultado procesar(byte[] cuerpo) {
         Envelope evento = parser.parsear(cuerpo);
 
-        // RF-18: con empleado.creado y empleado.retirado el servicio solo registra una traza
-        // (catálogo 3.1 y 3.3). La bienvenida sale con usuario.creado y la despedida con
-        // cuenta.desactivada (motivo RETIRO).
+        // RF-18: con empleado.creado y empleado.retirado el servicio actualiza la réplica
+        // y registra una traza (catálogo 3.1 y 3.3). La bienvenida sale con usuario.creado
+        // y la despedida con cuenta.desactivada (motivo RETIRO).
         if (constructor.esSoloTraza(evento)) {
+            transaccion.executeWithoutResult(status -> {
+                repositorio.actualizarReplica(evento);
+            });
             log.info("[TRAZA] {} recibido (id={}, empleadoId={}): no genera notificación",
                     evento.type(), evento.id(), evento.data().path("empleadoId").asText(""));
             return Resultado.TRAZA;
         }
 
+        // RF-42: para eventos que requieren réplica o crean pendientes, usar método transaccional
+        boolean requiereTransaccionCompleta = evento.type().equals(ConstructorNotificaciones.VACACIONES_FINALIZADAS)
+                || evento.type().equals(ConstructorNotificaciones.CUENTA_ACTIVADA)
+                || evento.type().equals(ConstructorNotificaciones.CUENTA_DESACTIVADA)
+                || evento.type().equals(ConstructorNotificaciones.VACACIONES_PROGRAMADAS)
+                || evento.type().equals(ConstructorNotificaciones.USUARIO_CREADO)
+                || evento.type().equals(ConstructorNotificaciones.USUARIO_RECUPERACION);
+
+        if (requiereTransaccionCompleta) {
+            return transaccion.execute(status -> {
+                // 1. Registrar evento (idempotencia)
+                if (!repositorio.registrarEvento(evento.id())) {
+                    log.info("Evento duplicado descartado: type={} id={}", evento.type(), evento.id());
+                    return Resultado.DUPLICADO;
+                }
+
+                // 2. Construir notificaciones (dentro de transacción)
+                List<NotificacionNueva> nuevas = constructor.construirDentroTransaccion(evento, repositorio);
+
+                // 3. Filtrar nulos (cuentaActivada con FIN_VACACIONES devuelve null)
+                nuevas = nuevas.stream().filter(java.util.Objects::nonNull).toList();
+
+                // 4. Guardar notificaciones si hay
+                if (!nuevas.isEmpty()) {
+                    nuevas.forEach(n -> repositorio.guardar(n, evento.id()));
+                }
+
+                // 5. Determinar resultado
+                if (evento.type().equals(ConstructorNotificaciones.VACACIONES_FINALIZADAS) && nuevas.isEmpty()) {
+                    // Si vacaciones.finalizadas no generó notificación, verificar si fue por pendiente
+                    // (empleado desconocido) o por RETIRADO/estado inesperado
+                    // En ambos casos, el evento se registró correctamente
+                    return Resultado.PENDIENTE;
+                }
+
+                return Resultado.PROCESADO;
+            });
+        }
+
+        // Eventos que no requieren réplica (compatibilidad RF-41)
         List<NotificacionNueva> nuevas = constructor.construir(evento);
         if (nuevas.isEmpty()) {
             return Resultado.IGNORADO;

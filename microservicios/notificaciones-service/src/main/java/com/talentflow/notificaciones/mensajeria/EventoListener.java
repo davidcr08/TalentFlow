@@ -11,7 +11,7 @@ import org.springframework.stereotype.Component;
 
 /**
  * Consumidor de la cola del servicio. Política de confirmación:
- *  - procesado / duplicado / ignorado -> el método termina normal  -> ack
+ *  - procesado / duplicado / ignorado / traza / pendiente -> el método termina normal  -> ack
  *  - mensaje inválido (no tiene arreglo) -> AmqpRejectAndDontRequeueException -> reject sin reencolar
  *  - fallo transitorio (p. ej. BD caída) -> pausa y se relanza -> el broker reencola y se reintenta
  */

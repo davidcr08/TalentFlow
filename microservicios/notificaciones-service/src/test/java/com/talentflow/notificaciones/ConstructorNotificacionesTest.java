@@ -125,14 +125,18 @@ class ConstructorNotificacionesTest {
     // ---- RF-17: CUENTA según el motivo ----
 
     private NotificacionNueva cuenta(String tipo, String motivo, String extra) {
-        return constructor.construir(evento(tipo,
-                "{\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\",\"motivo\":\"" + motivo + "\"" + extra + "}"))
-                .get(0);
+        List<NotificacionNueva> lista = constructor.construir(evento(tipo,
+                "{\"empleadoId\":\"E001\",\"email\":\"juan@empresa.com\",\"motivo\":\"" + motivo + "\"" + extra + "}"));
+        if (lista.isEmpty()) {
+            return null;
+        }
+        return lista.get(0);
     }
 
     @Test
     void cuentaDesactivadaPorVacaciones() {
         NotificacionNueva n = cuenta("cuenta.desactivada", "VACACIONES", ",\"permanente\":false");
+        assertThat(n).isNotNull();
         assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
         assertThat(n.destinatario()).isEqualTo("juan@empresa.com");
         assertThat(n.mensaje()).contains("suspendida temporalmente").contains("vacaciones");
@@ -141,6 +145,7 @@ class ConstructorNotificacionesTest {
     @Test
     void cuentaDesactivadaPorRetiroEsLaDespedida() {
         NotificacionNueva n = cuenta("cuenta.desactivada", "RETIRO", ",\"permanente\":true");
+        assertThat(n).isNotNull();
         assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
         assertThat(n.mensaje()).contains("Gracias por su trabajo").contains("permanente").contains("retiro");
     }
@@ -148,24 +153,26 @@ class ConstructorNotificacionesTest {
     @Test
     void cuentaActivadaPorActivacionInicial() {
         NotificacionNueva n = cuenta("cuenta.activada", "ACTIVACION_INICIAL", "");
+        assertThat(n).isNotNull();
         assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
         assertThat(n.mensaje()).contains("activada").contains("iniciar sesión");
     }
 
     @Test
-    void cuentaActivadaPorFinDeVacaciones() {
+    void cuentaActivadaPorFinDeVacacionesNoGeneraNotificacionRF42() {
+        // RF-42: cuenta.activada con motivo FIN_VACACIONES no genera notificación
+        // (la bienvenida la genera vacaciones.finalizadas)
         NotificacionNueva n = cuenta("cuenta.activada", "FIN_VACACIONES", "");
-        assertThat(n.tipo()).isEqualTo(TipoNotificacion.CUENTA);
-        assertThat(n.mensaje()).contains("vacaciones han finalizado").contains("reactivada");
+        assertThat(n).isNull();
     }
 
     @Test
     void cadaMotivoTieneUnMensajeDistinto() {
+        // RF-42: FIN_VACACIONES ya no genera notificación en cuenta.activada
         List<String> mensajes = List.of(
                 cuenta("cuenta.desactivada", "VACACIONES", ",\"permanente\":false").mensaje(),
                 cuenta("cuenta.desactivada", "RETIRO", ",\"permanente\":true").mensaje(),
-                cuenta("cuenta.activada", "ACTIVACION_INICIAL", "").mensaje(),
-                cuenta("cuenta.activada", "FIN_VACACIONES", "").mensaje());
+                cuenta("cuenta.activada", "ACTIVACION_INICIAL", "").mensaje());
         assertThat(mensajes).doesNotHaveDuplicates();
     }
 

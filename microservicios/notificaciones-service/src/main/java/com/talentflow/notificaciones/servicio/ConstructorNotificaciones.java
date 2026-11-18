@@ -5,6 +5,7 @@ import com.talentflow.notificaciones.dominio.NotificacionNueva;
 import com.talentflow.notificaciones.dominio.TipoNotificacion;
 import com.talentflow.notificaciones.eventos.Envelope;
 import com.talentflow.notificaciones.eventos.EventoInvalidoException;
+import com.talentflow.notificaciones.repositorio.NotificacionRepository;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -13,8 +14,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Traduce un evento del catálogo a las notificaciones que corresponden (función
- * pura, sin I/O).
+ * Traduce un evento del catálogo a las notificaciones que corresponden.
  *
  * <ul>
  * <li>RF-16 usuario.creado / usuario.recuperacion -> SEGURIDAD con el enlace y el token.</li>
@@ -23,6 +23,9 @@ import org.springframework.stereotype.Component;
  * <li>RF-18 usuario.creado -> además, BIENVENIDA. empleado.creado y empleado.retirado ya NO envían
  * nada: solo dejan una traza (catálogo 3.1 y 3.3).</li>
  * <li>vacaciones.programadas -> VACACIONES (sin cambios).</li>
+ * <li>RF-42: vacaciones.finalizadas -> bienvenida de regreso si empleado ACTIVO; sin notificación si RETIRADO;
+ * pendiente si desconocido.</li>
+ * <li>RF-42: cuenta.activada con motivo FIN_VACACIONES -> no genera notificación (evita duplicidad).</li>
  * </ul>
  */
 @Component
@@ -35,6 +38,7 @@ public class ConstructorNotificaciones {
     public static final String CUENTA_ACTIVADA = "cuenta.activada";
     public static final String CUENTA_DESACTIVADA = "cuenta.desactivada";
     public static final String VACACIONES_PROGRAMADAS = "vacaciones.programadas";
+    public static final String VACACIONES_FINALIZADAS = "vacaciones.finalizadas";
 
     public static final String ENLACE_RESET_POR_DEFECTO = "http://localhost:8080/auth/reset-password";
 
@@ -58,16 +62,81 @@ public class ConstructorNotificaciones {
         return EMPLEADO_CREADO.equals(evento.type()) || EMPLEADO_RETIRADO.equals(evento.type());
     }
 
-    /** Lista vacía si este servicio no genera notificación para ese tipo de evento. */
+    /**
+     * Lista vacía si este servicio no genera notificación para ese tipo de evento.
+     * Este método es para eventos que no requieren acceso a réplica (compatibilidad RF-41).
+     */
     public List<NotificacionNueva> construir(Envelope evento) {
         return switch (evento.type()) {
             case USUARIO_CREADO -> List.of(bienvenida(evento), activacion(evento));
             case USUARIO_RECUPERACION -> List.of(recuperacion(evento));
-            case CUENTA_ACTIVADA -> List.of(cuentaActivada(evento));
+            case CUENTA_ACTIVADA -> {
+                var n = cuentaActivada(evento);
+                yield n != null ? List.of(n) : List.of();
+            }
             case CUENTA_DESACTIVADA -> List.of(cuentaDesactivada(evento));
             case VACACIONES_PROGRAMADAS -> List.of(vacaciones(evento));
             default -> List.of();
         };
+    }
+
+    /**
+     * Construye notificaciones para eventos que requieren consultar la réplica de empleados
+     * o crear pendientes. Debe llamarse dentro de una transacción.
+     *
+     * @param evento     evento recibido
+     * @param repo       repositorio para consultar réplica y crear pendientes
+     * @return lista de notificaciones a guardar, o lista vacía si no hay notificación
+     */
+    public List<NotificacionNueva> construirDentroTransaccion(Envelope evento, NotificacionRepository repo) {
+        return switch (evento.type()) {
+            case VACACIONES_FINALIZADAS -> bienvenidaRegreso(evento, repo);
+            case CUENTA_ACTIVADA -> List.of(cuentaActivada(evento));
+            case CUENTA_DESACTIVADA -> List.of(cuentaDesactivada(evento));
+            case VACACIONES_PROGRAMADAS -> List.of(vacaciones(evento));
+            case USUARIO_CREADO -> List.of(bienvenida(evento), activacion(evento));
+            case USUARIO_RECUPERACION -> List.of(recuperacion(evento));
+            default -> List.of();
+        };
+    }
+
+    // ---- RF-42: bienvenida de regreso (vacaciones.finalizadas) ----
+
+    /**
+     * Genera la bienvenida de regreso al recibir vacaciones.finalizadas.
+     * Consulta la réplica local de empleados:
+     * - ACTIVO: genera notificación CUENTA con mensaje de bienvenida.
+     * - RETIRADO: no genera notificación.
+     * - Desconocido: crea pendiente en BD y devuelve lista vacía (el evento se ACKea).
+     */
+    private List<NotificacionNueva> bienvenidaRegreso(Envelope e, NotificacionRepository repo) {
+        String empleadoId = requerido(e, "empleadoId");
+        String email = requerido(e, "email");
+        String vacacionesId = requerido(e, "vacacionesId");
+        java.time.LocalDate fechaFin = java.time.LocalDate.parse(requerido(e, "fechaFin"));
+
+        var empleadoOpt = repo.obtenerEmpleado(empleadoId);
+        if (empleadoOpt.isEmpty()) {
+            // Empleado desconocido: crear pendiente para reconciliación posterior
+            repo.crearPendiente(e.id(), empleadoId, email, fechaFin, vacacionesId);
+            return List.of();
+        }
+
+        String estadoEmp = empleadoOpt.get().estado();
+        if ("RETIRADO".equals(estadoEmp)) {
+            // Empleado retirado: no enviar bienvenida
+            return List.of();
+        }
+
+        if (!"ACTIVO".equals(estadoEmp)) {
+            // Estado inesperado: tratar como desconocido para no asumir ACTIVO
+            repo.crearPendiente(e.id(), empleadoId, email, fechaFin, vacacionesId);
+            return List.of();
+        }
+
+        // ACTIVO: generar bienvenida de regreso
+        String mensaje = "Sus vacaciones han finalizado: su cuenta ha sido reactivada. ¡Bienvenido de vuelta!";
+        return List.of(new NotificacionNueva(TipoNotificacion.CUENTA, email, mensaje, empleadoId));
     }
 
     // ---- RF-18: bienvenida (usuario.creado) ----
@@ -121,9 +190,15 @@ public class ConstructorNotificaciones {
         String email = requerido(e, "email");
         String mensaje = switch (opcional(e, "motivo")) {
             case "ACTIVACION_INICIAL" -> "Su cuenta ha sido activada. Ya puede iniciar sesión con su nueva contraseña.";
-            case "FIN_VACACIONES" -> "Sus vacaciones han finalizado: su cuenta ha sido reactivada. ¡Bienvenido de vuelta!";
+            case "FIN_VACACIONES" -> {
+                // RF-42: no generar notificación aquí para evitar duplicidad con vacaciones.finalizadas
+                yield "";
+            }
             default -> "Su cuenta ha sido activada.";
         };
+        if (mensaje.isEmpty()) {
+            return null; // No generar notificación
+        }
         return new NotificacionNueva(TipoNotificacion.CUENTA, email, mensaje, empleadoId);
     }
 

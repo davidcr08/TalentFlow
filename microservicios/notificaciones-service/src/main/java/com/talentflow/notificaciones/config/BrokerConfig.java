@@ -109,4 +109,21 @@ public class BrokerConfig implements ApplicationListener<ApplicationReadyEvent> 
     public Binding bindingVacacionesProgramadas(Queue notificacionesQueue, TopicExchange eventosExchange) {
         return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("vacaciones.programadas");
     }
+
+    // RF-42: bienvenida al finalizar vacaciones
+    @Bean
+    public Binding bindingVacacionesFinalizadas(Queue notificacionesQueue, TopicExchange eventosExchange) {
+        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("vacaciones.finalizadas");
+    }
+
+    // RF-42: réplica local de empleados
+    @Bean
+    public Binding bindingEmpleadoCreadoReplica(Queue notificacionesQueue, TopicExchange eventosExchange) {
+        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("empleado.creado");
+    }
+
+    @Bean
+    public Binding bindingEmpleadoRetiradoReplica(Queue notificacionesQueue, TopicExchange eventosExchange) {
+        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("empleado.retirado");
+    }
 }

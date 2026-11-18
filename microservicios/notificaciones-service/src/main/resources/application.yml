@@ -19,7 +19,7 @@ spring:
     listener:
       simple:
         acknowledge-mode: auto
-        prefetch: 10
+        prefetch: 1
         default-requeue-rejected: true
   jackson:
     serialization:
@@ -32,6 +32,9 @@ app:
   # RF-16: base del enlace que se envía en las notificaciones de SEGURIDAD (se le añade ?token=...).
   enlaces:
     reset-password: ${ENLACE_RESET_PASSWORD:http://localhost:8080/auth/reset-password}
+  # RF-42: intervalo de reconciliación de pendientes (ms)
+  reconciliacion:
+    intervalo-ms: 300000
 
 # Swagger bajo /notificaciones/* para que sea alcanzable por el Gateway sin agregarle rutas
 # (el Gateway solo enruta el prefijo /notificaciones).
