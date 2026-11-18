@@ -1,3 +1,4 @@
-com\talentflow\notificaciones\ConstructorNotificacionesTest.class
-com\talentflow\notificaciones\ProcesadorEventosTest.class
 com\talentflow\notificaciones\EventoParserTest.class
+com\talentflow\notificaciones\ConstructorNotificacionesTest.class
+com\talentflow\notificaciones\IntegracionRF42Test.class
+com\talentflow\notificaciones\ProcesadorEventosTest.class

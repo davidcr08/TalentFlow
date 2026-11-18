@@ -2,6 +2,7 @@ com\talentflow\notificaciones\dominio\TipoNotificacion.class
 com\talentflow\notificaciones\repositorio\NotificacionRepository$Pendiente.class
 com\talentflow\notificaciones\web\HealthController.class
 com\talentflow\notificaciones\NotificacionesApplication.class
+com\talentflow\notificaciones\servicio\PendientesReconciliador$ResultadoProcesamiento.class
 com\talentflow\notificaciones\servicio\ProcesadorEventos.class
 com\talentflow\notificaciones\repositorio\NotificacionRepository.class
 com\talentflow\notificaciones\web\ManejadorErrores.class
@@ -9,6 +10,7 @@ com\talentflow\notificaciones\repositorio\NotificacionRepository$NotificacionExi
 com\talentflow\notificaciones\web\NotificacionController.class
 com\talentflow\notificaciones\eventos\EventoInvalidoException.class
 com\talentflow\notificaciones\dominio\NotificacionNueva.class
+com\talentflow\notificaciones\servicio\PendientesReconciliador$ResultadoProcesamiento$Tipo.class
 com\talentflow\notificaciones\mensajeria\EventoListener.class
 com\talentflow\notificaciones\repositorio\NotificacionRepository$EmpleadoReplica.class
 com\talentflow\notificaciones\dominio\Notificacion.class

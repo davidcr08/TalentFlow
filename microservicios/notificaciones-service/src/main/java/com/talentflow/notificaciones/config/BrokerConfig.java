@@ -26,36 +26,22 @@ public class BrokerConfig implements ApplicationListener<ApplicationReadyEvent> 
 
     private static final Logger log = LoggerFactory.getLogger(BrokerConfig.class);
 
-    static {
-        System.err.println("=== BrokerConfig CLASS LOADED (static initializer) ===");
-        log.error("=== BrokerConfig CLASS LOADED (static initializer) ===");
-    }
-
     private final AmqpAdmin amqpAdmin;
 
     public BrokerConfig(AmqpAdmin amqpAdmin) {
         this.amqpAdmin = amqpAdmin;
-        System.err.println("=== BrokerConfig CONSTRUCTOR (System.err) ===");
-        log.error("=== BrokerConfig CONSTRUCTOR (ERROR level) ===");
-    }
-
-    @PostConstruct
-    public void init() {
-        System.err.println("=== BrokerConfig @PostConstruct (System.err) ===");
-        log.error("=== BrokerConfig @PostConstruct ===");
     }
 
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
-        log.error("=== BrokerConfig: ApplicationReadyEvent recibido ===");
-        System.err.println("=== BrokerConfig: ApplicationReadyEvent recibido (System.err) ===");
+        log.info("BrokerConfig: ApplicationReadyEvent recibido");
         try {
             if (amqpAdmin instanceof RabbitAdmin rabbitAdmin) {
-                log.error("Invocando RabbitAdmin.afterPropertiesSet()...");
+                log.info("Invocando RabbitAdmin.afterPropertiesSet()...");
                 rabbitAdmin.afterPropertiesSet();
-                log.error("Declaración de topología RabbitMQ completada");
+                log.info("Declaración de topología RabbitMQ completada");
             } else {
-                log.error("AmqpAdmin no es RabbitAdmin: {}", amqpAdmin.getClass().getName());
+                log.warn("AmqpAdmin no es RabbitAdmin: {}", amqpAdmin.getClass().getName());
             }
         } catch (Exception e) {
             log.error("Error declarando topología RabbitMQ: {}", e.getMessage(), e);
@@ -114,16 +100,5 @@ public class BrokerConfig implements ApplicationListener<ApplicationReadyEvent> 
     @Bean
     public Binding bindingVacacionesFinalizadas(Queue notificacionesQueue, TopicExchange eventosExchange) {
         return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("vacaciones.finalizadas");
-    }
-
-    // RF-42: réplica local de empleados
-    @Bean
-    public Binding bindingEmpleadoCreadoReplica(Queue notificacionesQueue, TopicExchange eventosExchange) {
-        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("empleado.creado");
-    }
-
-    @Bean
-    public Binding bindingEmpleadoRetiradoReplica(Queue notificacionesQueue, TopicExchange eventosExchange) {
-        return BindingBuilder.bind(notificacionesQueue).to(eventosExchange).with("empleado.retirado");
     }
 }
